@@ -386,7 +386,10 @@ class CallManager(
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
             bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
             rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
+            // after repeated failures, go through the relay server only (works on every network)
+            if ((retries[uid] ?: 0) >= 2) iceTransportsType = PeerConnection.IceTransportsType.RELAY
         }
+        Diag.log("create pc $uid offer=$makeOffer relayOnly=${(retries[uid] ?: 0) >= 2}")
         val observer = PcObserver(uid)
         val pc = factory.createPeerConnection(config, observer) ?: return null
         observer.pc = pc

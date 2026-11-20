@@ -132,12 +132,13 @@ class CallActivity : ComponentActivity() {
 
 // ---------------- video tile ----------------
 @Composable
-fun VideoView(track: VideoTrack?, egl: EglBase, mirror: Boolean, fit: Boolean, modifier: Modifier = Modifier) {
+fun VideoView(track: VideoTrack?, egl: EglBase, mirror: Boolean, fit: Boolean, modifier: Modifier = Modifier, overlay: Boolean = false) {
     AndroidView(
         factory = { ctx ->
             SurfaceViewRenderer(ctx).apply {
                 init(egl.eglBaseContext, null)
                 setEnableHardwareScaler(true)
+                if (overlay) setZOrderMediaOverlay(true)
             }
         },
         update = { r ->
@@ -162,96 +163,135 @@ fun VideoView(track: VideoTrack?, egl: EglBase, mirror: Boolean, fit: Boolean, m
 
 data class Tile(
     val key: String, val name: String, val track: VideoTrack?, val camOn: Boolean, val micOn: Boolean,
-    val sharing: Boolean, val local: Boolean, val teacher: Boolean
+    val sharing: Boolean, val local: Boolean, val teacher: Boolean, val conn: String
 )
 
 @Composable
-fun TileView(t: Tile, m: CallManager, modifier: Modifier) {
-    Box(modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xFF1C2421))) {
-        val showVideo = t.track != null && (t.camOn || t.sharing)
+fun Avatar(name: String, size: Int) {
+    Box(Modifier.size(size.dp).clip(CircleShape).background(Brand), contentAlignment = Alignment.Center) {
+        Text(name.trim().take(1).uppercase(), color = Color.White, fontSize = (size * 0.42f).sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+fun TileView(t: Tile, m: CallManager, modifier: Modifier, overlay: Boolean = false, compact: Boolean = false) {
+    Box(modifier.clip(RoundedCornerShape(if (compact) 12.dp else 16.dp)).background(Color(0xFF1C2421))) {
+        val connected = t.local || t.conn == "connected"
+        val showVideo = t.track != null && (t.camOn || t.sharing) && connected
         if (showVideo) {
-            VideoView(t.track, m.egl, mirror = t.local && !t.sharing && m.frontCamera.value, fit = t.sharing, modifier = Modifier.fillMaxSize())
+            VideoView(t.track, m.egl, mirror = t.local && !t.sharing && m.frontCamera.value, fit = t.sharing,
+                modifier = Modifier.fillMaxSize(), overlay = overlay)
         } else {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Box(Modifier.size(72.dp).clip(CircleShape).background(Brand), contentAlignment = Alignment.Center) {
-                    Text(t.name.trim().take(1).uppercase(), color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Avatar(t.name, if (compact) 40 else 76)
+                if (!connected && !compact) {
+                    Spacer(Modifier.height(12.dp))
+                    if (t.conn == "failed") {
+                        Text(L.t("connFailed"), color = Color(0xFFFCA5A5), fontSize = 13.sp)
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(Modifier.size(14.dp), color = Color(0xFF7DD3C7), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text(L.t("connecting"), color = Color(0xCCFFFFFF), fontSize = 13.sp)
+                        }
+                    }
                 }
             }
         }
         Row(
-            Modifier.align(Alignment.BottomStart).padding(8.dp).clip(RoundedCornerShape(8.dp)).background(Color(0x99000000))
-                .padding(horizontal = 8.dp, vertical = 4.dp),
+            Modifier.align(Alignment.BottomStart).padding(if (compact) 5.dp else 8.dp).clip(RoundedCornerShape(8.dp)).background(Color(0x99000000))
+                .padding(horizontal = 7.dp, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (!t.micOn) { Icon(Icons.Filled.MicOff, null, tint = Color(0xFFFCA5A5), modifier = Modifier.size(14.dp)); Spacer(Modifier.width(4.dp)) }
-            if (t.teacher) { Icon(Icons.Filled.School, null, tint = Color(0xFF7DD3C7), modifier = Modifier.size(14.dp)); Spacer(Modifier.width(4.dp)) }
-            Text(if (t.local) "${t.name} (${L.t("you")})" else t.name, color = Color.White, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (!t.micOn) { Icon(Icons.Filled.MicOff, null, tint = Color(0xFFFCA5A5), modifier = Modifier.size(13.dp)); Spacer(Modifier.width(3.dp)) }
+            if (t.teacher) { Icon(Icons.Filled.School, null, tint = Color(0xFF7DD3C7), modifier = Modifier.size(13.dp)); Spacer(Modifier.width(3.dp)) }
+            Text(if (t.local) L.t("you") else t.name, color = Color.White, fontSize = if (compact) 10.sp else 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
+}
+
+@Composable
+fun ElapsedTimer(): String {
+    var secs by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) { while (true) { delay(1000); secs++ } }
+    val h = secs / 3600; val mm = (secs % 3600) / 60; val ss = secs % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, mm, ss) else "%02d:%02d".format(mm, ss)
 }
 
 // ---------------- call screen ----------------
 @Composable
 fun CallScreen(m: CallManager, title: String, onShare: () -> Unit, onLeave: () -> Unit) {
     var chatOpen by remember { mutableStateOf(false) }
-    var bgOpen by remember { mutableStateOf(false) }
+    var moreOpen by remember { mutableStateOf(false) }
     var confirmEnd by remember { mutableStateOf(false) }
 
     BackHandler {
         when {
             chatOpen -> { chatOpen = false; m.chatOpen = false }
-            bgOpen -> bgOpen = false
+            moreOpen -> moreOpen = false
             else -> confirmEnd = true
         }
     }
 
-    // class ended by teacher
     if (m.ended.value) {
         LaunchedEffect(Unit) { delay(2500); onLeave() }
         Box(Modifier.fillMaxSize().background(Color(0xFF101614)), contentAlignment = Alignment.Center) {
-            Text(L.t("classEnded"), color = Color.White, fontSize = 20.sp)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Filled.CheckCircle, null, tint = Color(0xFF2DD4BF), modifier = Modifier.size(56.dp))
+                Spacer(Modifier.height(12.dp))
+                Text(L.t("classEnded"), color = Color.White, fontSize = 20.sp)
+            }
         }
         return
     }
 
-    val local = Tile("me", m.myName, m.localVideo.value, m.camOn.value, m.micOn.value, m.sharing.value, true, m.isTeacher)
+    val local = Tile("me", m.myName, m.localVideo.value, m.camOn.value, m.micOn.value, m.sharing.value, true, m.isTeacher, "connected")
     val remotes = m.peers.values.sortedByDescending { it.role.value == "teacher" }.map {
-        Tile(it.uid, it.name.value, it.video.value, it.cam.value, it.mic.value, it.sharing.value, false, it.role.value == "teacher")
+        Tile(it.uid, it.name.value, it.video.value, it.cam.value, it.mic.value, it.sharing.value, false, it.role.value == "teacher", it.conn.value)
     }
     val sharer = remotes.firstOrNull { it.sharing }
+    val elapsed = ElapsedTimer()
 
     Column(Modifier.fillMaxSize().background(Color(0xFF101614)).systemBarsPadding()) {
         // header
-        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(8.dp).clip(CircleShape).background(if (m.connected.value) LiveRed else Color.Gray))
-            Spacer(Modifier.width(8.dp))
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(
-                    if (!m.connected.value) L.t("connecting") else if (remotes.isEmpty()) L.t("waitingOthers") else "${remotes.size + 1} " + (if (L.lang == "bn") "জন যুক্ত" else "people"),
-                    color = Color(0x99FFFFFF), fontSize = 12.sp
-                )
+                Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(7.dp).clip(CircleShape).background(if (m.connected.value) LiveRed else Color.Gray))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        when {
+                            !m.connected.value -> L.t("connecting")
+                            remotes.isEmpty() -> "$elapsed · ${L.t("waitingOthers")}"
+                            else -> "$elapsed · ${remotes.size + 1} ${L.t("joined")}"
+                        },
+                        color = Color(0x99FFFFFF), fontSize = 12.sp
+                    )
+                }
             }
             LangSwitch(dark = true)
         }
 
-        // videos
-        Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp)) {
-            if (sharer != null) {
-                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // stage
+        Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp)) {
+            when {
+                sharer != null -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     TileView(sharer, m, Modifier.weight(1f).fillMaxWidth())
-                    Row(Modifier.height(110.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        (listOf(local) + remotes.filter { it !== sharer }).forEach { TileView(it, m, Modifier.weight(1f).fillMaxHeight()) }
+                    Row(Modifier.height(104.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        (listOf(local) + remotes.filter { it !== sharer }).forEach { TileView(it, m, Modifier.weight(1f).fillMaxHeight(), compact = true) }
                     }
                 }
-            } else {
-                val all = remotes + local
-                when (all.size) {
-                    1 -> TileView(all[0], m, Modifier.fillMaxSize())
-                    2 -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        all.forEach { TileView(it, m, Modifier.weight(1f).fillMaxWidth()) }
-                    }
-                    else -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                remotes.isEmpty() -> TileView(local, m, Modifier.fillMaxSize())
+                remotes.size == 1 -> Box(Modifier.fillMaxSize()) {
+                    // one-to-one: other person full screen, yourself in a floating window
+                    TileView(remotes[0], m, Modifier.fillMaxSize())
+                    TileView(local, m, Modifier.align(Alignment.TopEnd).padding(10.dp).size(108.dp, 150.dp)
+                        .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(12.dp)), overlay = true, compact = true)
+                }
+                else -> {
+                    val all = remotes + local
+                    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         all.chunked(2).forEach { row ->
                             Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 row.forEach { TileView(it, m, Modifier.weight(1f).fillMaxHeight()) }
@@ -262,61 +302,77 @@ fun CallScreen(m: CallManager, title: String, onShare: () -> Unit, onLeave: () -
                 }
             }
             if (m.sharing.value) {
-                Text(
-                    L.t("sharingScreen"), color = Color.White, fontSize = 12.sp,
-                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp).clip(RoundedCornerShape(8.dp))
-                        .background(Brand).padding(horizontal = 10.dp, vertical = 4.dp)
-                )
+                Row(
+                    Modifier.align(Alignment.TopCenter).padding(top = 8.dp).clip(RoundedCornerShape(10.dp))
+                        .background(Brand).padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Filled.ScreenShare, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(L.t("sharingScreen"), color = Color.White, fontSize = 12.sp)
+                }
             }
         }
 
-        // background picker
-        if (bgOpen) {
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+        // "more" panel: flip, speaker, backgrounds
+        if (moreOpen) {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp).clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xFF1C2421)).padding(12.dp)
             ) {
-                BG_OPTIONS.forEach { opt ->
-                    val sel = m.bg.value.key == opt.key
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { m.setBackground(opt) }) {
-                        Box(
-                            Modifier.size(64.dp, 48.dp).clip(RoundedCornerShape(8.dp))
-                                .border(2.dp, if (sel) Color(0xFF2DD4BF) else Color.Transparent, RoundedCornerShape(8.dp))
-                                .background(Color(0xFF2A3431)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            when (opt.resId) {
-                                null -> Icon(Icons.Filled.Block, null, tint = Color.White)
-                                0 -> Icon(Icons.Filled.BlurOn, null, tint = Color.White)
-                                else -> Image(painterResource(opt.resId), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    PillAction(Icons.Filled.Cameraswitch, L.t("flip")) { m.flipCamera() }
+                    PillAction(if (m.speakerOn.value) Icons.Filled.VolumeUp else Icons.Filled.Hearing,
+                        L.t("speaker"), on = m.speakerOn.value) { m.toggleSpeaker() }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text(L.t("background"), color = Color(0xCCFFFFFF), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    BG_OPTIONS.forEach { opt ->
+                        val sel = m.bg.value.key == opt.key
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { m.setBackground(opt) }) {
+                            Box(
+                                Modifier.size(68.dp, 50.dp).clip(RoundedCornerShape(10.dp))
+                                    .border(2.dp, if (sel) Color(0xFF2DD4BF) else Color(0x22FFFFFF), RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF2A3431)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                when (opt.resId) {
+                                    null -> Icon(Icons.Filled.Block, null, tint = Color.White)
+                                    0 -> Icon(Icons.Filled.BlurOn, null, tint = Color.White)
+                                    else -> Image(painterResource(opt.resId), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                }
                             }
+                            Spacer(Modifier.height(3.dp))
+                            Text(L.t(opt.key), color = if (sel) Color(0xFF2DD4BF) else Color.White, fontSize = 11.sp)
                         }
-                        Text(L.t(opt.key), color = Color.White, fontSize = 11.sp)
                     }
                 }
             }
         }
 
-        // controls
+        // control bar
         Row(
-            Modifier.fillMaxWidth().padding(vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically
+            Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Top
         ) {
             CtrlButton(if (m.micOn.value) Icons.Filled.Mic else Icons.Filled.MicOff, L.t("mic"), active = m.micOn.value) { m.toggleMic() }
             CtrlButton(if (m.camOn.value) Icons.Filled.Videocam else Icons.Filled.VideocamOff, L.t("camera"), active = m.camOn.value) { m.toggleCam() }
-            CtrlButton(Icons.Filled.Cameraswitch, L.t("flip"), active = true) { m.flipCamera() }
             CtrlButton(if (m.sharing.value) Icons.Filled.StopScreenShare else Icons.Filled.ScreenShare,
-                if (m.sharing.value) L.t("stopShare") else L.t("share"), active = !m.sharing.value, highlight = m.sharing.value) { onShare() }
-            CtrlButton(Icons.Filled.Wallpaper, L.t("background"), active = true, highlight = bgOpen) { bgOpen = !bgOpen }
-            BadgedBox(badge = { if (m.unread.value > 0) Badge { Text("${m.unread.value}") } }) {
-                CtrlButton(Icons.AutoMirrored.Filled.Chat, L.t("chat"), active = true) {
-                    chatOpen = true; m.chatOpen = true; m.unread.value = 0
-                }
+                if (m.sharing.value) L.t("stopShare") else L.t("share"), active = true, highlight = m.sharing.value) { onShare() }
+            CtrlButton(Icons.AutoMirrored.Filled.Chat, L.t("chat"), active = true, badge = m.unread.value) {
+                chatOpen = true; m.chatOpen = true; m.unread.value = 0
             }
-            Box(
-                Modifier.size(52.dp).clip(CircleShape).background(LiveRed).clickable { confirmEnd = true },
-                contentAlignment = Alignment.Center
-            ) { Icon(Icons.Filled.CallEnd, L.t("leave"), tint = Color.White) }
+            CtrlButton(Icons.Filled.MoreHoriz, L.t("more"), active = true, highlight = moreOpen) { moreOpen = !moreOpen }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    Modifier.size(width = 60.dp, height = 48.dp).clip(RoundedCornerShape(24.dp)).background(LiveRed).clickable { confirmEnd = true },
+                    contentAlignment = Alignment.Center
+                ) { Icon(Icons.Filled.CallEnd, L.t("leave"), tint = Color.White) }
+                Spacer(Modifier.height(4.dp))
+                Text(if (m.isTeacher) L.t("endClass") else L.t("leave"), color = Color(0xCCFFFFFF), fontSize = 10.sp, maxLines = 1)
+            }
         }
     }
 
@@ -358,13 +414,38 @@ fun CallScreen(m: CallManager, title: String, onShare: () -> Unit, onLeave: () -
 }
 
 @Composable
-fun CtrlButton(icon: ImageVector, label: String, active: Boolean, highlight: Boolean = false, onClick: () -> Unit) {
-    Box(
-        Modifier.size(46.dp).clip(CircleShape)
-            .background(if (highlight) Brand else if (active) Color(0xFF2A3431) else Color(0xFFF1F5F4))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
+fun PillAction(icon: ImageVector, label: String, on: Boolean = false, onClick: () -> Unit) {
+    Row(
+        Modifier.clip(RoundedCornerShape(20.dp)).background(if (on) Brand else Color(0xFF2A3431)).clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, label, tint = if (highlight || active) Color.White else Ink, modifier = Modifier.size(22.dp))
+        Icon(icon, null, tint = Color.White, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(label, color = Color.White, fontSize = 13.sp)
+    }
+}
+
+@Composable
+fun CtrlButton(icon: ImageVector, label: String, active: Boolean, highlight: Boolean = false, badge: Int = 0, onClick: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(56.dp)) {
+        Box {
+            Box(
+                Modifier.size(48.dp).clip(CircleShape)
+                    .background(if (highlight) Brand else if (active) Color(0xFF2A3431) else Color(0xFFF1F5F4))
+                    .clickable(onClick = onClick),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, label, tint = if (highlight || active) Color.White else Ink, modifier = Modifier.size(22.dp))
+            }
+            if (badge > 0) {
+                Box(
+                    Modifier.align(Alignment.TopEnd).size(18.dp).clip(CircleShape).background(LiveRed),
+                    contentAlignment = Alignment.Center
+                ) { Text(if (badge > 9) "9+" else "$badge", color = Color.White, fontSize = 10.sp) }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(label, color = Color(0xCCFFFFFF), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

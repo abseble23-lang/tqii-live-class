@@ -183,24 +183,28 @@ object Api {
         rest("POST", "messages", JSONObject().put("class_id", classId).put("sender_id", userId).put("body", body).toString())
     }
 
+    /** STUN + TURN servers from the "ice-servers" edge function (falls back to STUN only). */
     suspend fun iceServers(): List<PeerConnection.IceServer> {
         val list = mutableListOf<PeerConnection.IceServer>()
         try {
-            val arr = JSONArray(rest("GET", "app_config?select=value&key=eq.ice_servers"))
-            if (arr.length() > 0) {
-                val servers = arr.getJSONObject(0).getJSONArray("value")
-                for (i in 0 until servers.length()) {
-                    val s = servers.getJSONObject(i)
-                    val urlsAny = s.get("urls")
-                    val urls = if (urlsAny is JSONArray) (0 until urlsAny.length()).map { urlsAny.getString(it) } else listOf(urlsAny.toString())
-                    val b = PeerConnection.IceServer.builder(urls)
-                    if (s.has("username")) b.setUsername(s.getString("username"))
-                    if (s.has("credential")) b.setPassword(s.getString("credential"))
-                    list += b.createIceServer()
-                }
+            token()
+            val res = raw("POST", "${Config.SUPABASE_URL}/functions/v1/ice-servers", "{}", true)
+            val servers = JSONObject(res).getJSONArray("iceServers")
+            for (i in 0 until servers.length()) {
+                val s = servers.getJSONObject(i)
+                val urlsAny = s.get("urls")
+                val urls = if (urlsAny is JSONArray) (0 until urlsAny.length()).map { urlsAny.getString(it) } else listOf(urlsAny.toString())
+                val b = PeerConnection.IceServer.builder(urls)
+                if (s.has("username")) b.setUsername(s.getString("username"))
+                if (s.has("credential")) b.setPassword(s.getString("credential"))
+                list += b.createIceServer()
             }
-        } catch (_: Exception) { }
-        if (list.isEmpty()) list += PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer()
+        } catch (e: Exception) {
+            android.util.Log.w("Api", "ice servers", e)
+        }
+        if (list.isEmpty()) {
+            list += PeerConnection.IceServer.builder(listOf("stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302")).createIceServer()
+        }
         return list
     }
 

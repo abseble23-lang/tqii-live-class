@@ -99,7 +99,18 @@ object L {
         "close" to "বন্ধ",
         "send" to "পাঠান",
         "today" to "আজ",
-        "reconnecting" to "পুনরায় সংযোগ হচ্ছে..."
+        "reconnecting" to "পুনরায় সংযোগ হচ্ছে...",
+        "updateTitle" to "নতুন আপডেট এসেছে",
+        "updateMsg" to "অ্যাপের নতুন ভার্সন পাওয়া গেছে। এখনই আপডেট করুন।",
+        "updateNow" to "আপডেট করুন",
+        "later" to "পরে",
+        "downloading" to "ডাউনলোড হচ্ছে",
+        "allowInstall" to "আপডেট ইনস্টলের অনুমতি দিন, তারপর আবার 'আপডেট করুন' চাপুন",
+        "updateFailed" to "আপডেট ডাউনলোড হয়নি, আবার চেষ্টা করুন",
+        "connFailed" to "সংযোগ করা যাচ্ছে না",
+        "speaker" to "স্পিকার",
+        "more" to "আরো",
+        "joined" to "জন যুক্ত"
     )
 
     private val en = mapOf(
@@ -156,6 +167,17 @@ object L {
         "close" to "Close",
         "send" to "Send",
         "today" to "Today",
-        "reconnecting" to "Reconnecting..."
+        "reconnecting" to "Reconnecting...",
+        "updateTitle" to "Update available",
+        "updateMsg" to "A new version of the app is available. Update now.",
+        "updateNow" to "Update",
+        "later" to "Later",
+        "downloading" to "Downloading",
+        "allowInstall" to "Allow installing updates, then tap 'Update' again",
+        "updateFailed" to "Update download failed, try again",
+        "connFailed" to "Can't connect",
+        "speaker" to "Speaker",
+        "more" to "More",
+        "joined" to "joined"
     )
 }

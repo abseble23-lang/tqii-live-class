@@ -11,6 +11,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -51,6 +52,8 @@ class PeerState(val uid: String, name: String, role: String) {
     val cam = mutableStateOf(true)
     val sharing = mutableStateOf(false)
     val connected = mutableStateOf(false)
+    /** "connecting" | "connected" | "failed" */
+    val conn = mutableStateOf("connecting")
 }
 
 class CallManager(
@@ -99,6 +102,11 @@ class CallManager(
     private val pcs = HashMap<String, PeerConnection>()
     private val videoSenders = HashMap<String, RtpSender>()
     private val pendingIce = HashMap<String, MutableList<IceCandidate>>()
+    private val iceReady = HashSet<String>()                       // we may send ICE to this peer
+    private val outIce = HashMap<String, MutableList<JSONObject>>() // ICE waiting for our SDP to go out first
+    private val retries = HashMap<String, Int>()
+    private val watchdogs = HashMap<String, Job>()
+    val speakerOn = mutableStateOf(true)
     private var channel: ClassChannel? = null
     private val audioManager = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
@@ -145,16 +153,27 @@ class CallManager(
 
     private fun setupAudioRouting() {
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        applySpeaker()
+    }
+
+    private fun applySpeaker() {
         if (Build.VERSION.SDK_INT >= 31) {
             val devices = audioManager.availableCommunicationDevices
-            val preferred = devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+            val headset = devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
                 ?: devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET }
-                ?: devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-            preferred?.let { audioManager.setCommunicationDevice(it) }
+                ?: devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_USB_HEADSET }
+            val target = headset
+                ?: devices.firstOrNull { it.type == if (speakerOn.value) AudioDeviceInfo.TYPE_BUILTIN_SPEAKER else AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
+            target?.let { audioManager.setCommunicationDevice(it) }
         } else {
             @Suppress("DEPRECATION")
-            audioManager.isSpeakerphoneOn = !audioManager.isWiredHeadsetOn
+            audioManager.isSpeakerphoneOn = speakerOn.value && !audioManager.isWiredHeadsetOn
         }
+    }
+
+    fun toggleSpeaker() {
+        speakerOn.value = !speakerOn.value
+        applySpeaker()
     }
 
     private fun startCamera(front: Boolean) {
@@ -276,9 +295,11 @@ class CallManager(
         // joined
         others.forEach { (uid, meta) ->
             if (!peers.containsKey(uid)) {
-                peers[uid] = PeerState(uid, meta.optString("name", names[uid] ?: "?"), meta.optString("role"))
-                names[uid] = meta.optString("name", names[uid] ?: "?")
-                if (myId < uid) createPeer(uid, makeOffer = true)
+                val nm = meta.optString("name").ifBlank { names[uid] ?: "?" }
+                peers[uid] = PeerState(uid, nm, meta.optString("role"))
+                names[uid] = nm
+                retries[uid] = 0
+                if (myId < uid) createPeer(uid, makeOffer = true) else watch(uid)
                 sendState()
             }
         }
@@ -293,6 +314,7 @@ class CallManager(
                     "offer" -> handleOffer(from, payload.getString("sdp"))
                     "answer" -> handleAnswer(from, payload.getString("sdp"))
                     "ice" -> handleIce(from, payload.getJSONObject("candidate"))
+                    "restart" -> if (myId < from && peers.containsKey(from)) createPeer(from, makeOffer = true)
                 }
             }
             "state" -> {
@@ -322,14 +344,45 @@ class CallManager(
         channel?.broadcast("signal", p)
     }
 
+    /** Our SDP went out: from now on ICE candidates can be sent directly. */
+    private fun markIceReady(uid: String) {
+        iceReady += uid
+        outIce.remove(uid)?.forEach { c -> signal(uid, "ice") { put("candidate", c) } }
+    }
+
+    /** If a peer is not connected within 20 s, try again (offerer re-offers, answerer asks for a restart). */
+    private fun watch(uid: String) {
+        watchdogs.remove(uid)?.cancel()
+        watchdogs[uid] = scope.launch {
+            delay(20_000)
+            if (peers[uid]?.conn?.value != "connected") onPeerFailed(uid)
+        }
+    }
+
+    private fun onPeerFailed(uid: String) {
+        val p = peers[uid] ?: return
+        val n = (retries[uid] ?: 0) + 1
+        retries[uid] = n
+        if (n > 5) { p.conn.value = "failed"; return }
+        p.conn.value = "connecting"
+        Log.i("Call", "retry $n with $uid")
+        if (myId < uid) createPeer(uid, makeOffer = true)
+        else { signal(uid, "restart") {}; watch(uid) }
+    }
+
     private fun createPeer(uid: String, makeOffer: Boolean): PeerConnection? {
         closePc(uid)
         val config = PeerConnection.RTCConfiguration(iceServers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+            bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
+            rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
         }
-        val pc = factory.createPeerConnection(config, PcObserver(uid)) ?: return null
+        val observer = PcObserver(uid)
+        val pc = factory.createPeerConnection(config, observer) ?: return null
+        observer.pc = pc
         pcs[uid] = pc
+        peers[uid]?.conn?.value = "connecting"
         audioTrack?.let { pc.addTrack(it, listOf("s0")) }
         val vt = if (sharing.value) screenTrack else localVideo.value
         vt?.let { t -> pc.addTrack(t, listOf("s0"))?.let { videoSenders[uid] = it } }
@@ -338,29 +391,40 @@ class CallManager(
                 try {
                     val offer = pc.awaitCreate(true)
                     pc.awaitSetLocal(offer)
+                    if (pcs[uid] !== pc) return@launch
                     signal(uid, "offer") { put("sdp", offer.description) }
+                    markIceReady(uid)
                 } catch (e: Exception) { Log.w("Call", "offer failed", e) }
             }
         }
+        watch(uid)
         return pc
     }
 
     private fun handleOffer(from: String, sdp: String) {
-        if (!peers.containsKey(from)) peers[from] = PeerState(from, names[from] ?: "?", "")
+        if (!peers.containsKey(from)) {
+            peers[from] = PeerState(from, names[from] ?: "?", "")
+            retries[from] = 0
+        }
+        val queued = pendingIce.remove(from) // candidates that raced ahead of the offer
         val pc = createPeer(from, makeOffer = false) ?: return
+        if (queued != null) pendingIce[from] = queued
         scope.launch {
             try {
                 pc.awaitSetRemote(SessionDescription(SessionDescription.Type.OFFER, sdp))
                 flushIce(from)
                 val answer = pc.awaitCreate(false)
                 pc.awaitSetLocal(answer)
+                if (pcs[from] !== pc) return@launch
                 signal(from, "answer") { put("sdp", answer.description) }
+                markIceReady(from)
             } catch (e: Exception) { Log.w("Call", "answer failed", e) }
         }
     }
 
     private fun handleAnswer(from: String, sdp: String) {
         val pc = pcs[from] ?: return
+        if (pc.signalingState() != PeerConnection.SignalingState.HAVE_LOCAL_OFFER) return
         scope.launch {
             try {
                 pc.awaitSetRemote(SessionDescription(SessionDescription.Type.ANSWER, sdp))
@@ -383,39 +447,62 @@ class CallManager(
 
     private fun closePc(uid: String) {
         videoSenders.remove(uid)
-        pendingIce.remove(uid)
+        iceReady.remove(uid)
+        outIce.remove(uid)
         peers[uid]?.video?.value = null
         pcs.remove(uid)?.let { pc ->
             scope.launch {
-                delay(300) // let the UI detach renderers first
+                delay(400) // let the UI detach renderers first
                 try { pc.dispose() } catch (_: Exception) {}
             }
         }
     }
 
     private fun closePeer(uid: String) {
+        watchdogs.remove(uid)?.cancel()
+        pendingIce.remove(uid)
         closePc(uid)
         peers.remove(uid)
     }
 
     private inner class PcObserver(val uid: String) : PeerConnection.Observer {
+        var pc: PeerConnection? = null
+        private fun current() = pc != null && pcs[uid] === pc
+
         override fun onIceCandidate(c: IceCandidate) {
+            val json = JSONObject().put("sdpMid", c.sdpMid).put("sdpMLineIndex", c.sdpMLineIndex).put("candidate", c.sdp)
             scope.launch {
-                signal(uid, "ice") {
-                    put("candidate", JSONObject().put("sdpMid", c.sdpMid).put("sdpMLineIndex", c.sdpMLineIndex).put("candidate", c.sdp))
-                }
+                if (!current()) return@launch
+                if (uid in iceReady) signal(uid, "ice") { put("candidate", json) }
+                else outIce.getOrPut(uid) { mutableListOf() }.add(json)
             }
         }
         override fun onTrack(transceiver: RtpTransceiver) {
             val t = transceiver.receiver.track()
-            if (t is VideoTrack) scope.launch { peers[uid]?.video?.value = t }
+            if (t is VideoTrack) scope.launch { if (current()) peers[uid]?.video?.value = t }
         }
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
             scope.launch {
-                peers[uid]?.connected?.value = newState == PeerConnection.PeerConnectionState.CONNECTED
-                if (newState == PeerConnection.PeerConnectionState.FAILED && myId < uid && peers.containsKey(uid)) {
-                    delay(1500)
-                    if (peers.containsKey(uid)) createPeer(uid, makeOffer = true)
+                if (!current()) return@launch
+                val p = peers[uid] ?: return@launch
+                Log.i("Call", "peer $uid -> $newState")
+                when (newState) {
+                    PeerConnection.PeerConnectionState.CONNECTED -> {
+                        p.connected.value = true; p.conn.value = "connected"
+                        retries[uid] = 0
+                        watchdogs.remove(uid)?.cancel()
+                    }
+                    PeerConnection.PeerConnectionState.FAILED -> {
+                        p.connected.value = false
+                        onPeerFailed(uid)
+                    }
+                    PeerConnection.PeerConnectionState.DISCONNECTED -> {
+                        p.connected.value = false; p.conn.value = "connecting"
+                        val mine = pc
+                        delay(6000)
+                        if (pcs[uid] === mine && mine?.connectionState() != PeerConnection.PeerConnectionState.CONNECTED) onPeerFailed(uid)
+                    }
+                    else -> {}
                 }
             }
         }
@@ -434,6 +521,7 @@ class CallManager(
     fun leave() {
         if (current === this) current = null
         channel?.close(); channel = null
+        watchdogs.values.forEach { it.cancel() }; watchdogs.clear()
         pcs.keys.toList().forEach { uid -> videoSenders.remove(uid); pcs.remove(uid)?.let { try { it.dispose() } catch (_: Exception) {} } }
         peers.clear()
         stopShare()

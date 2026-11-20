@@ -20,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -81,7 +82,50 @@ sealed class Screen {
 }
 
 @Composable
+fun UpdateDialog() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var update by remember { mutableStateOf<Updater.Update?>(null) }
+    var progress by remember { mutableIntStateOf(-1) }
+    var msg by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) { update = Updater.check(ctx) }
+    val u = update ?: return
+    AlertDialog(
+        onDismissRequest = { if (progress < 0) update = null },
+        icon = { Icon(Icons.Filled.SystemUpdate, null, tint = Brand) },
+        title = { Text(L.t("updateTitle")) },
+        text = {
+            Column {
+                Text(L.t("updateMsg") + "\n" + u.name, color = Muted)
+                if (progress >= 0) {
+                    Spacer(Modifier.height(14.dp))
+                    LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth())
+                    Text("${L.t("downloading")} $progress%", fontSize = 12.sp, color = Muted, modifier = Modifier.padding(top = 4.dp))
+                }
+                if (msg.isNotEmpty()) Text(msg, color = LiveRed, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+            }
+        },
+        confirmButton = {
+            Button(enabled = progress < 0, onClick = {
+                msg = ""
+                if (!Updater.ensureInstallPermission(ctx)) { msg = L.t("allowInstall"); return@Button }
+                progress = 0
+                scope.launch {
+                    try {
+                        val f = Updater.download(ctx, u) { progress = it }
+                        Updater.install(ctx, f)
+                    } catch (e: Exception) { msg = L.t("updateFailed") }
+                    progress = -1
+                }
+            }) { Text(L.t("updateNow")) }
+        },
+        dismissButton = { if (progress < 0) TextButton(onClick = { update = null }) { Text(L.t("later")) } }
+    )
+}
+
+@Composable
 fun Root() {
+    UpdateDialog()
     var screen by remember { mutableStateOf<Screen>(if (Api.loggedIn) Screen.Home else Screen.Login) }
     when (val s = screen) {
         is Screen.Login -> LoginScreen { screen = Screen.Home }

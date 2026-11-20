@@ -112,6 +112,8 @@ class CallManager(
 
     fun start() {
         current = this
+        Diag.start(ctx, classId)
+        Diag.log("start me=$myId teacher=$isTeacher sdk=${Build.VERSION.SDK_INT} model=${Build.MODEL}")
         PeerConnectionFactory.initialize(
             PeerConnectionFactory.InitializationOptions.builder(ctx.applicationContext).createInitializationOptions()
         )
@@ -140,6 +142,7 @@ class CallManager(
                 Api.profiles().values.forEach { names[it.id] = it.fullName }
             } catch (_: Exception) {}
             iceServers = Api.iceServers()
+            Diag.log("ice servers: " + iceServers.joinToString { it.urls.joinToString("|") + (if (it.username.isNullOrEmpty()) "" else "(auth)") })
             try {
                 messages.addAll(Api.messages(classId))
             } catch (_: Exception) {}
@@ -284,12 +287,13 @@ class CallManager(
     }
 
     // ---------------- signaling ----------------
-    override fun onConnection(connected: Boolean) { this.connected.value = connected }
+    override fun onConnection(connected: Boolean) { this.connected.value = connected; Diag.log("channel connected=$connected") }
 
     override fun onJoined() { sendState() }
 
     override fun onPresence(online: Map<String, JSONObject>) {
         val others = online.filterKeys { it != myId && it.isNotBlank() }
+        Diag.log("presence: ${online.keys}")
         // left
         peers.keys.filter { it !in others }.forEach { closePeer(it) }
         // joined
@@ -310,7 +314,10 @@ class CallManager(
             "signal" -> {
                 if (payload.optString("to") != myId) return
                 val from = payload.optString("from")
-                when (payload.optString("type")) {
+                val tp = payload.optString("type")
+                if (tp == "ice") Diag.log("recv ice from $from: " + candType(payload.optJSONObject("candidate")?.optString("candidate")))
+                else Diag.log("recv $tp from $from")
+                when (tp) {
                     "offer" -> handleOffer(from, payload.getString("sdp"))
                     "answer" -> handleAnswer(from, payload.getString("sdp"))
                     "ice" -> handleIce(from, payload.getJSONObject("candidate"))
@@ -341,6 +348,7 @@ class CallManager(
     private fun signal(to: String, type: String, extra: JSONObject.() -> Unit) {
         val p = JSONObject().put("from", myId).put("to", to).put("type", type)
         p.extra()
+        if (type != "ice") Diag.log("send $type to $to")
         channel?.broadcast("signal", p)
     }
 
@@ -363,6 +371,7 @@ class CallManager(
         val p = peers[uid] ?: return
         val n = (retries[uid] ?: 0) + 1
         retries[uid] = n
+        Diag.log("peer failed $uid retry=$n")
         if (n > 5) { p.conn.value = "failed"; return }
         p.conn.value = "connecting"
         Log.i("Call", "retry $n with $uid")
@@ -394,7 +403,7 @@ class CallManager(
                     if (pcs[uid] !== pc) return@launch
                     signal(uid, "offer") { put("sdp", offer.description) }
                     markIceReady(uid)
-                } catch (e: Exception) { Log.w("Call", "offer failed", e) }
+                } catch (e: Exception) { Log.w("Call", "offer failed", e); Diag.log("offer error: ${e.message}") }
             }
         }
         watch(uid)
@@ -418,18 +427,18 @@ class CallManager(
                 if (pcs[from] !== pc) return@launch
                 signal(from, "answer") { put("sdp", answer.description) }
                 markIceReady(from)
-            } catch (e: Exception) { Log.w("Call", "answer failed", e) }
+            } catch (e: Exception) { Log.w("Call", "answer failed", e); Diag.log("answer error: ${e.message}") }
         }
     }
 
     private fun handleAnswer(from: String, sdp: String) {
         val pc = pcs[from] ?: return
-        if (pc.signalingState() != PeerConnection.SignalingState.HAVE_LOCAL_OFFER) return
+        if (pc.signalingState() != PeerConnection.SignalingState.HAVE_LOCAL_OFFER) { Diag.log("answer ignored, state=${pc.signalingState()}"); return }
         scope.launch {
             try {
                 pc.awaitSetRemote(SessionDescription(SessionDescription.Type.ANSWER, sdp))
                 flushIce(from)
-            } catch (e: Exception) { Log.w("Call", "setRemote answer failed", e) }
+            } catch (e: Exception) { Log.w("Call", "setRemote answer failed", e); Diag.log("setRemote answer error: ${e.message}") }
         }
     }
 
@@ -473,6 +482,7 @@ class CallManager(
             val json = JSONObject().put("sdpMid", c.sdpMid).put("sdpMLineIndex", c.sdpMLineIndex).put("candidate", c.sdp)
             scope.launch {
                 if (!current()) return@launch
+                Diag.log("local ice for $uid: " + candType(c.sdp))
                 if (uid in iceReady) signal(uid, "ice") { put("candidate", json) }
                 else outIce.getOrPut(uid) { mutableListOf() }.add(json)
             }
@@ -486,6 +496,7 @@ class CallManager(
                 if (!current()) return@launch
                 val p = peers[uid] ?: return@launch
                 Log.i("Call", "peer $uid -> $newState")
+                Diag.log("pc $uid -> $newState")
                 when (newState) {
                     PeerConnection.PeerConnectionState.CONNECTED -> {
                         p.connected.value = true; p.conn.value = "connected"
@@ -507,9 +518,9 @@ class CallManager(
             }
         }
         override fun onSignalingChange(state: PeerConnection.SignalingState) {}
-        override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {}
+        override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) { Diag.log("ice $uid -> $state") }
         override fun onIceConnectionReceivingChange(receiving: Boolean) {}
-        override fun onIceGatheringChange(state: PeerConnection.IceGatheringState) {}
+        override fun onIceGatheringChange(state: PeerConnection.IceGatheringState) { Diag.log("gathering $uid -> $state") }
         override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>) {}
         override fun onAddStream(stream: MediaStream) {}
         override fun onRemoveStream(stream: MediaStream) {}
@@ -518,7 +529,16 @@ class CallManager(
     }
 
     // ---------------- teardown ----------------
+    private fun candType(sdp: String?): String {
+        if (sdp == null) return "?"
+        val typ = Regex("typ (\\w+)").find(sdp)?.groupValues?.get(1) ?: "?"
+        val proto = if (sdp.contains(" udp ", true)) "udp" else if (sdp.contains(" tcp ", true)) "tcp" else "?"
+        return "$typ/$proto"
+    }
+
     fun leave() {
+        Diag.log("leave")
+        kotlinx.coroutines.runBlocking { try { kotlinx.coroutines.withTimeout(1500) { Diag.flush() } } catch (_: Exception) {} }
         if (current === this) current = null
         channel?.close(); channel = null
         watchdogs.values.forEach { it.cancel() }; watchdogs.clear()

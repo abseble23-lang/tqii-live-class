@@ -184,6 +184,10 @@ object Api {
     }
 
     /** STUN + TURN servers from the "ice-servers" edge function (falls back to STUN only). */
+    suspend fun insertLogs(json: String) {
+        rest("POST", "call_logs", json, "return=minimal")
+    }
+
     suspend fun iceServers(): List<PeerConnection.IceServer> {
         val list = mutableListOf<PeerConnection.IceServer>()
         try {

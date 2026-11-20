@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TQII Live Class — Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f4f6f5; --card:#fff; --ink:#14201b; --muted:#5f6f68; --line:#e2e8e5;
+    --brand:#0f766e; --brand-2:#115e59; --brand-soft:#e6f4f2;
+    --live:#dc2626; --live-soft:#fee2e2; --warn:#b45309; --ok:#15803d;
+    --radius:12px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Hind Siliguri",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:15px}
+  button,input,select{font:inherit}
+  .hidden{display:none!important}
+  /* login */
+  .login-wrap{min-height:100vh;display:grid;place-items:center;padding:20px}
+  .login{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:32px;width:100%;max-width:380px}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:20px;margin-bottom:6px}
+  .logo .dot{width:34px;height:34px;border-radius:10px;background:var(--brand);display:grid;place-items:center;color:#fff;font-size:16px}
+  .sub{color:var(--muted);margin:0 0 22px}
+  label{display:block;font-size:13px;font-weight:600;color:var(--muted);margin:12px 0 5px}
+  input,select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff}
+  input:focus,select:focus{outline:2px solid var(--brand-soft);border-color:var(--brand)}
+  .btn{border:0;border-radius:10px;padding:10px 16px;font-weight:600;cursor:pointer;background:var(--brand);color:#fff}
+  .btn:hover{background:var(--brand-2)}
+  .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+  .btn.ghost:hover{background:#f0f3f2}
+  .btn.danger{background:#fff;color:var(--live);border:1px solid #f5c2c2}
+  .btn.sm{padding:6px 10px;font-size:13px}
+  .btn.block{width:100%;margin-top:20px}
+  .err{color:var(--live);font-size:14px;min-height:20px;margin-top:10px}
+  /* layout */
+  header{background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+  .bar{max-width:1100px;margin:0 auto;display:flex;align-items:center;gap:12px;padding:12px 20px}
+  .bar .logo{margin:0;font-size:17px}
+  .spacer{flex:1}
+  nav{max-width:1100px;margin:0 auto;display:flex;gap:4px;padding:0 20px;overflow-x:auto}
+  nav button{background:none;border:0;padding:10px 14px;cursor:pointer;color:var(--muted);font-weight:600;border-bottom:2px solid transparent;white-space:nowrap}
+  nav button.active{color:var(--brand);border-color:var(--brand)}
+  main{max-width:1100px;margin:0 auto;padding:22px 20px 60px}
+  .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+  h2{margin:0;font-size:20px}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:22px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px}
+  .stat .n{font-size:28px;font-weight:700}
+  .stat .l{color:var(--muted);font-size:13px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+  table{width:100%;border-collapse:collapse}
+  th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
+  th{font-size:12px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);background:#fafbfb}
+  tr:last-child td{border-bottom:0}
+  .muted{color:var(--muted)}
+  .pill{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:600}
+  .pill.live{background:var(--live-soft);color:var(--live)}
+  .pill.live::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--live);animation:blink 1.2s infinite}
+  .pill.scheduled{background:var(--brand-soft);color:var(--brand)}
+  .pill.ended{background:#eef0ef;color:var(--muted)}
+  .pill.off{background:#fef3c7;color:var(--warn)}
+  @keyframes blink{50%{opacity:.3}}
+  .actions{display:flex;gap:6px;flex-wrap:wrap}
+  .empty{padding:30px;text-align:center;color:var(--muted)}
+  .lang{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .lang button{border:0;background:#fff;padding:5px 10px;cursor:pointer;font-weight:600;font-size:13px}
+  .lang button.on{background:var(--brand);color:#fff}
+  /* modal */
+  .modal-bg{position:fixed;inset:0;background:rgba(10,20,16,.45);display:grid;place-items:center;padding:16px;z-index:20}
+  .modal{background:#fff;border-radius:16px;padding:24px;width:100%;max-width:480px;max-height:90vh;overflow:auto}
+  .modal h3{margin:0 0 6px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+  .checks{border:1px solid var(--line);border-radius:10px;max-height:190px;overflow:auto;padding:6px}
+  .checks label{display:flex;align-items:center;gap:8px;margin:0;padding:6px 8px;border-radius:8px;color:var(--ink);font-weight:500;font-size:14px;cursor:pointer}
+  .checks label:hover{background:#f4f6f5}
+  .checks input{width:auto}
+  .modal .foot{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:10px;z-index:30;font-size:14px}
+  .chatlog{border:1px solid var(--line);border-radius:10px;padding:10px;max-height:340px;overflow:auto;background:#fafbfb}
+  .msg{margin-bottom:8px}.msg b{font-size:13px}.msg .t{font-size:11px;color:var(--muted);margin-left:6px}
+  @media (max-width:640px){ .grid2{grid-template-columns:1fr} .hide-sm{display:none} th,td{padding:9px 10px} }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginView" class="login-wrap hidden">
+  <form class="login" id="loginForm">
+    <div class="logo"><span class="dot">▶</span> TQII Live Class</div>
+    <p class="sub" data-t="adminPanel"></p>
+    <label data-t="username"></label>
+    <input id="lu" autocomplete="username" required>
+    <label data-t="password"></label>
+    <input id="lp" type="password" autocomplete="current-password" required>
+    <button class="btn block" data-t="login"></button>
+    <div class="err" id="loginErr"></div>
+    <div style="margin-top:8px" class="lang" id="langLogin"></div>
+  </form>
+</div>
+
+<!-- APP -->
+<div id="appView" class="hidden">
+  <header>
+    <div class="bar">
+      <div class="logo"><span class="dot">▶</span> TQII Live Class</div>
+      <div class="spacer"></div>
+      <div class="lang" id="langApp"></div>
+      <button class="btn ghost sm" id="pwBtn" data-t="changePw"></button>
+      <button class="btn ghost sm" id="logoutBtn" data-t="logout"></button>
+    </div>
+    <nav id="tabs"></nav>
+  </header>
+  <main id="main"></main>
+</div>
+
+<div id="modalRoot"></div>
+
+<script type="module">
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const SUPABASE_URL = "https://vxhmjftlxmpreolktwya.supabase.co";
+const SUPABASE_KEY = "sb_publishable_YoTBdksIVKVb0IB5yGzrtw_nTHYiR8h";
+const DOMAIN = "users.tqiilive.app";
+const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ---------- i18n ----------
+const T = {
+  bn: {
+    adminPanel:"অ্যাডমিন প্যানেল", username:"ইউজার আইডি", password:"পাসওয়ার্ড", login:"লগইন", logout:"লগআউট",
+    changePw:"পাসওয়ার্ড বদলান", dashboard:"ড্যাশবোর্ড", classes:"ক্লাস", teachers:"শিক্ষক", students:"ছাত্র-ছাত্রী", admins:"অ্যাডমিন",
+    liveNow:"এখন লাইভ", today:"আজকের ক্লাস", totalTeachers:"মোট শিক্ষক", totalStudents:"মোট ছাত্র-ছাত্রী",
+    addTeacher:"+ নতুন শিক্ষক", addStudent:"+ নতুন ছাত্র", addAdmin:"+ নতুন অ্যাডমিন", addClass:"+ নতুন ক্লাস",
+    name:"নাম", phone:"ফোন", status:"অবস্থা", actions:"অপশন", active:"সক্রিয়", inactive:"বন্ধ",
+    resetPw:"পাসওয়ার্ড রিসেট", disable:"বন্ধ করুন", enable:"চালু করুন", del:"মুছুন", edit:"এডিট", chat:"চ্যাট",
+    title:"ক্লাসের নাম", subject:"বিষয়", teacher:"শিক্ষক", time:"সময়", duration:"সময়কাল (মিনিট)", studentsMax:"ছাত্র (সর্বোচ্চ ৩ জন)",
+    save:"সেভ করুন", cancel:"বাতিল", close:"বন্ধ",
+    live:"লাইভ", scheduled:"নির্ধারিত", ended:"শেষ", none:"কিছু নেই", noTeacher:"— শিক্ষক বাছুন —",
+    confirmDel:"নিশ্চিতভাবে মুছে ফেলবেন?", saved:"সেভ হয়েছে", newPw:"নতুন পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর)",
+    max3:"সর্বোচ্চ ৩ জন ছাত্র বাছাই করা যাবে", wrongLogin:"ইউজার আইডি বা পাসওয়ার্ড ভুল", notAdmin:"এই অ্যাকাউন্টটি অ্যাডমিন নয়",
+    userHint:"ছোট হাতের ইংরেজি অক্ষর, সংখ্যা, _ বা . (৩-৩০ অক্ষর)", filter:"ফিল্টার", all:"সব", upcoming:"আসন্ন",
+    endClass:"ক্লাস শেষ করুন", minutes:"মিনিট", noMessages:"কোনো মেসেজ নেই", search:"খুঁজুন...",
+    err_username_taken:"এই ইউজার আইডি আগে থেকেই আছে", err_invalid_username:"ইউজার আইডি সঠিক নয়", err_weak_password:"পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে",
+    err_name_required:"নাম দিন", err_cannot_change_self:"নিজের অ্যাকাউন্ট বন্ধ/মুছা যাবে না"
+  },
+  en: {
+    adminPanel:"Admin Panel", username:"User ID", password:"Password", login:"Log in", logout:"Log out",
+    changePw:"Change password", dashboard:"Dashboard", classes:"Classes", teachers:"Teachers", students:"Students", admins:"Admins",
+    liveNow:"Live now", today:"Today's classes", totalTeachers:"Teachers", totalStudents:"Students",
+    addTeacher:"+ New teacher", addStudent:"+ New student", addAdmin:"+ New admin", addClass:"+ New class",
+    name:"Name", phone:"Phone", status:"Status", actions:"Actions", active:"Active", inactive:"Disabled",
+    resetPw:"Reset password", disable:"Disable", enable:"Enable", del:"Delete", edit:"Edit", chat:"Chat",
+    title:"Class title", subject:"Subject", teacher:"Teacher", time:"Time", duration:"Duration (min)", studentsMax:"Students (max 3)",
+    save:"Save", cancel:"Cancel", close:"Close",
+    live:"Live", scheduled:"Scheduled", ended:"Ended", none:"Nothing here", noTeacher:"— Select teacher —",
+    confirmDel:"Delete this for sure?", saved:"Saved", newPw:"New password (min 6 characters)",
+    max3:"You can select at most 3 students", wrongLogin:"Wrong user ID or password", notAdmin:"This account is not an admin",
+    userHint:"lowercase letters, numbers, _ or . (3-30 chars)", filter:"Filter", all:"All", upcoming:"Upcoming",
+    endClass:"End class", minutes:"min", noMessages:"No messages", search:"Search...",
+    err_username_taken:"This user ID already exists", err_invalid_username:"Invalid user ID", err_weak_password:"Password must be at least 6 characters",
+    err_name_required:"Name is required", err_cannot_change_self:"You can't disable/delete your own account"
+  }
+};
+let lang = localStorageGet("lang") || "bn";
+const t = k => T[lang][k] ?? k;
+function localStorageGet(k){ try{return localStorage.getItem(k)}catch{return null} }
+function localStorageSet(k,v){ try{localStorage.setItem(k,v)}catch{} }
+function applyStatic(){
+  document.documentElement.lang = lang;
+  document.querySelectorAll("[data-t]").forEach(el => el.textContent = t(el.dataset.t));
+  for (const id of ["langLogin","langApp"]) {
+    const box = document.getElementById(id);
+    box.innerHTML = `<button type="button" class="${lang==='bn'?'on':''}" data-l="bn">বাংলা</button><button type="button" class="${lang==='en'?'on':''}" data-l="en">English</button>`;
+    box.querySelectorAll("button").forEach(b => b.onclick = () => { lang = b.dataset.l; localStorageSet("lang", lang); applyStatic(); render(); });
+  }
+}
+
+// ---------- helpers ----------
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function toast(msg){ const d=document.createElement("div"); d.className="toast"; d.textContent=msg; document.body.appendChild(d); setTimeout(()=>d.remove(),2600); }
+function fmtTime(iso){ const d=new Date(iso); return d.toLocaleString(lang==="bn"?"bn-BD":"en-GB",{day:"numeric",month:"short",hour:"numeric",minute:"2-digit"}); }
+function toLocalInput(iso){ const d=iso?new Date(iso):new Date(Date.now()+3600e3); d.setSeconds(0,0); const off=d.getTimezoneOffset(); return new Date(d-off*60e3).toISOString().slice(0,16); }
+async function callAdmin(body){
+  const { data, error } = await sb.functions.invoke("admin-users", { body });
+  if (error) {
+    let code = error.message;
+    try { const j = await error.context.json(); code = j.error || code; } catch {}
+    throw new Error(T[lang]["err_"+code] || code);
+  }
+  return data;
+}
+function modal(html, onMount){
+  const root = $("#modalRoot");
+  root.innerHTML = `<div class="modal-bg"><div class="modal">${html}</div></div>`;
+  const bg = root.firstElementChild;
+  bg.addEventListener("click", e => { if (e.target === bg) closeModal(); });
+  onMount?.(bg.firstElementChild);
+}
+function closeModal(){ $("#modalRoot").innerHTML = ""; chatChannel && sb.removeChannel(chatChannel); chatChannel = null; }
+
+// ---------- state ----------
+let me = null, tab = "dashboard", profiles = [], classes = [], roster = [], filterText = "", classFilter = "upcoming", chatChannel = null;
+
+async function loadAll(){
+  const [p, c, r] = await Promise.all([
+    sb.from("profiles").select("*").order("created_at",{ascending:false}),
+    sb.from("classes").select("*").order("scheduled_at",{ascending:true}),
+    sb.from("class_students").select("*")
+  ]);
+  profiles = p.data || []; classes = c.data || []; roster = r.data || [];
+}
+const byId = id => profiles.find(p => p.id === id);
+const studentsOf = cid => roster.filter(r => r.class_id === cid).map(r => byId(r.student_id)).filter(Boolean);
+
+// ---------- auth ----------
+async function boot(){
+  applyStatic();
+  const { data:{ session } } = await sb.auth.getSession();
+  if (session) await enter(); else showLogin();
+}
+function showLogin(){ $("#appView").classList.add("hidden"); $("#loginView").classList.remove("hidden"); }
+async function enter(){
+  const { data:{ user } } = await sb.auth.getUser();
+  const { data } = await sb.from("profiles").select("*").eq("id", user.id).maybeSingle();
+  if (!data || data.role !== "admin") { await sb.auth.signOut(); showLogin(); $("#loginErr").textContent = t("notAdmin"); return; }
+  me = data;
+  $("#loginView").classList.add("hidden"); $("#appView").classList.remove("hidden");
+  await loadAll(); render();
+  sb.channel("admin-live")
+    .on("postgres_changes",{event:"*",schema:"public",table:"classes"}, async () => { await loadAll(); render(); })
+    .subscribe();
+}
+$("#loginForm").onsubmit = async e => {
+  e.preventDefault(); $("#loginErr").textContent = "";
+  const u = $("#lu").value.trim().toLowerCase();
+  const { error } = await sb.auth.signInWithPassword({ email: `${u}@${DOMAIN}`, password: $("#lp").value });
+  if (error) { $("#loginErr").textContent = t("wrongLogin"); return; }
+  await enter();
+};
+$("#logoutBtn").onclick = async () => { await sb.auth.signOut(); location.reload(); };
+$("#pwBtn").onclick = () => {
+  modal(`<h3>${t("changePw")}</h3><label>${t("newPw")}</label><input id="np" type="password" minlength="6">
+    <div class="err" id="me"></div><div class="foot"><button class="btn ghost" id="c">${t("cancel")}</button><button class="btn" id="s">${t("save")}</button></div>`, m => {
+    m.querySelector("#c").onclick = closeModal;
+    m.querySelector("#s").onclick = async () => {
+      const pw = m.querySelector("#np").value;
+      if (pw.length < 6) { m.querySelector("#me").textContent = t("err_weak_password"); return; }
+      const { error } = await sb.auth.updateUser({ password: pw });
+      if (error) { m.querySelector("#me").textContent = error.message; return; }
+      closeModal(); toast(t("saved"));
+    };
+  });
+};
+
+// ---------- render ----------
+function render(){
+  if (!me) return;
+  const tabs = ["dashboard","classes","teachers","students","admins"];
+  $("#tabs").innerHTML = tabs.map(k => `<button class="${tab===k?'active':''}" data-k="${k}">${t(k)}</button>`).join("");
+  $("#tabs").querySelectorAll("button").forEach(b => b.onclick = () => { tab = b.dataset.k; filterText=""; render(); });
+  const main = $("#main");
+  if (tab === "dashboard") main.innerHTML = viewDashboard();
+  else if (tab === "classes") main.innerHTML = viewClasses();
+  else main.innerHTML = viewUsers({teachers:"teacher",students:"student",admins:"admin"}[tab]);
+  bindMain();
+}
+function statusPill(s){ return `<span class="pill ${s}">${t(s)}</span>`; }
+
+function viewDashboard(){
+  const live = classes.filter(c => c.status === "live");
+  const today = new Date().toDateString();
+  const todays = classes.filter(c => new Date(c.scheduled_at).toDateString() === today);
+  return `
+  <div class="stats">
+    <div class="stat"><div class="n" style="color:var(--live)">${live.length}</div><div class="l">${t("liveNow")}</div></div>
+    <div class="stat"><div class="n">${todays.length}</div><div class="l">${t("today")}</div></div>
+    <div class="stat"><div class="n">${profiles.filter(p=>p.role==="teacher").length}</div><div class="l">${t("totalTeachers")}</div></div>
+    <div class="stat"><div class="n">${profiles.filter(p=>p.role==="student").length}</div><div class="l">${t("totalStudents")}</div></div>
+  </div>
+  <div class="row"><h2>${t("liveNow")}</h2></div>
+  ${classTable(live)}
+  <div class="row" style="margin-top:24px"><h2>${t("today")}</h2></div>
+  ${classTable(todays)}`;
+}
+
+function viewClasses(){
+  const now = Date.now();
+  let list = classes;
+  if (classFilter === "upcoming") list = classes.filter(c => c.status !== "ended" && new Date(c.scheduled_at).getTime() + c.duration_min*60e3 > now - 6*3600e3);
+  if (classFilter === "live") list = classes.filter(c => c.status === "live");
+  if (classFilter === "ended") list = [...classes.filter(c => c.status === "ended")].reverse();
+  return `
+  <div class="row"><h2>${t("classes")}</h2><div class="spacer"></div>
+    <select id="cf" style="width:auto">${["upcoming","live","ended","all"].map(k=>`<option value="${k}" ${classFilter===k?"selected":""}>${t(k==="live"?"liveNow":k)}</option>`).join("")}</select>
+    <button class="btn" id="addClass">${t("addClass")}</button></div>
+  ${classTable(list, true)}`;
+}
+
+function classTable(list, full){
+  if (!list.length) return `<div class="card"><div class="empty">${t("none")}</div></div>`;
+  return `<div class="card"><table><thead><tr><th>${t("title")}</th><th>${t("teacher")}</th><th class="hide-sm">${t("students")}</th><th>${t("time")}</th><th>${t("status")}</th><th>${t("actions")}</th></tr></thead><tbody>
+  ${list.map(c => `<tr>
+    <td><b>${esc(c.title)}</b>${c.subject?`<div class="muted" style="font-size:13px">${esc(c.subject)}</div>`:""}</td>
+    <td>${esc(byId(c.teacher_id)?.full_name || "—")}</td>
+    <td class="hide-sm">${studentsOf(c.id).map(s=>esc(s.full_name)).join(", ") || "—"}</td>
+    <td>${fmtTime(c.scheduled_at)}<div class="muted" style="font-size:12px">${c.duration_min} ${t("minutes")}</div></td>
+    <td>${statusPill(c.status)}</td>
+    <td><div class="actions">
+      <button class="btn ghost sm" data-chat="${c.id}">${t("chat")}</button>
+      <button class="btn ghost sm" data-edit="${c.id}">${t("edit")}</button>
+      ${c.status==="live"?`<button class="btn danger sm" data-end="${c.id}">${t("endClass")}</button>`:""}
+      <button class="btn danger sm" data-delc="${c.id}">${t("del")}</button>
+    </div></td></tr>`).join("")}
+  </tbody></table></div>`;
+}
+
+function viewUsers(role){
+  const addKey = {teacher:"addTeacher",student:"addStudent",admin:"addAdmin"}[role];
+  const f = filterText.toLowerCase();
+  const list = profiles.filter(p => p.role === role && (!f || (p.full_name+" "+p.username+" "+(p.phone||"")).toLowerCase().includes(f)));
+  return `
+  <div class="row"><h2>${t(tab)}</h2><div class="spacer"></div>
+    <input id="q" placeholder="${t("search")}" value="${esc(filterText)}" style="width:200px">
+    <button class="btn" id="addUser" data-role="${role}">${t(addKey)}</button></div>
+  ${!list.length ? `<div class="card"><div class="empty">${t("none")}</div></div>` : `
+  <div class="card"><table><thead><tr><th>${t("name")}</th><th>${t("username")}</th><th class="hide-sm">${t("phone")}</th><th>${t("status")}</th><th>${t("actions")}</th></tr></thead><tbody>
+  ${list.map(p => `<tr>
+    <td><b>${esc(p.full_name)}</b></td><td><code>${esc(p.username)}</code></td><td class="hide-sm">${esc(p.phone||"—")}</td>
+    <td>${p.active?`<span class="pill scheduled">${t("active")}</span>`:`<span class="pill off">${t("inactive")}</span>`}</td>
+    <td><div class="actions">
+      <button class="btn ghost sm" data-pw="${p.id}">${t("resetPw")}</button>
+      ${p.id!==me.id?`<button class="btn ghost sm" data-act="${p.id}" data-v="${p.active?0:1}">${p.active?t("disable"):t("enable")}</button>
+      <button class="btn danger sm" data-delu="${p.id}">${t("del")}</button>`:""}
+    </div></td></tr>`).join("")}
+  </tbody></table></div>`}`;
+}
+
+function bindMain(){
+  const m = $("#main");
+  m.querySelector("#q")?.addEventListener("input", e => { filterText = e.target.value; const pos=e.target.selectionStart; render(); const q=$("#q"); q.focus(); q.setSelectionRange(pos,pos); });
+  m.querySelector("#cf")?.addEventListener("change", e => { classFilter = e.target.value; render(); });
+  m.querySelector("#addUser")?.addEventListener("click", e => userForm(e.target.dataset.role));
+  m.querySelector("#addClass")?.addEventListener("click", () => classForm());
+  m.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => classForm(classes.find(c => c.id === b.dataset.edit)));
+  m.querySelectorAll("[data-chat]").forEach(b => b.onclick = () => chatView(b.dataset.chat));
+  m.querySelectorAll("[data-end]").forEach(b => b.onclick = async () => {
+    await sb.from("classes").update({ status:"ended", ended_at:new Date().toISOString() }).eq("id", b.dataset.end);
+    await loadAll(); render();
+  });
+  m.querySelectorAll("[data-delc]").forEach(b => b.onclick = async () => {
+    if (!confirm(t("confirmDel"))) return;
+    const { error } = await sb.from("classes").delete().eq("id", b.dataset.delc);
+    if (error) return toast(error.message);
+    await loadAll(); render();
+  });
+  m.querySelectorAll("[data-pw]").forEach(b => b.onclick = () => resetPw(b.dataset.pw));
+  m.querySelectorAll("[data-act]").forEach(b => b.onclick = async () => {
+    try { await callAdmin({ action:"set_active", user_id:b.dataset.act, active: b.dataset.v === "1" }); await loadAll(); render(); } catch(e){ toast(e.message); }
+  });
+  m.querySelectorAll("[data-delu]").forEach(b => b.onclick = async () => {
+    if (!confirm(t("confirmDel"))) return;
+    try { await callAdmin({ action:"delete", user_id:b.dataset.delu }); await loadAll(); render(); } catch(e){ toast(e.message); }
+  });
+}
+
+// ---------- forms ----------
+function userForm(role){
+  const titleKey = {teacher:"addTeacher",student:"addStudent",admin:"addAdmin"}[role];
+  modal(`<h3>${t(titleKey).replace("+ ","")}</h3>
+    <label>${t("name")}</label><input id="fn" required>
+    <div class="grid2">
+      <div><label>${t("username")}</label><input id="un" autocapitalize="none"></div>
+      <div><label>${t("password")}</label><input id="pw" type="text"></div>
+    </div>
+    <div class="muted" style="font-size:12px;margin-top:4px">${t("userHint")}</div>
+    <label>${t("phone")}</label><input id="ph" type="tel">
+    <div class="err" id="fe"></div>
+    <div class="foot"><button class="btn ghost" id="c">${t("cancel")}</button><button class="btn" id="s">${t("save")}</button></div>`, m => {
+    m.querySelector("#c").onclick = closeModal;
+    m.querySelector("#s").onclick = async ev => {
+      ev.target.disabled = true;
+      try {
+        await callAdmin({ action:"create", role, full_name:m.querySelector("#fn").value, username:m.querySelector("#un").value, password:m.querySelector("#pw").value, phone:m.querySelector("#ph").value });
+        closeModal(); toast(t("saved")); await loadAll(); render();
+      } catch(e){ m.querySelector("#fe").textContent = e.message; ev.target.disabled = false; }
+    };
+  });
+}
+function resetPw(id){
+  const p = byId(id);
+  modal(`<h3>${t("resetPw")} — ${esc(p.full_name)}</h3><label>${t("newPw")}</label><input id="np" type="text">
+    <div class="err" id="fe"></div><div class="foot"><button class="btn ghost" id="c">${t("cancel")}</button><button class="btn" id="s">${t("save")}</button></div>`, m => {
+    m.querySelector("#c").onclick = closeModal;
+    m.querySelector("#s").onclick = async () => {
+      try { await callAdmin({ action:"reset_password", user_id:id, password:m.querySelector("#np").value }); closeModal(); toast(t("saved")); }
+      catch(e){ m.querySelector("#fe").textContent = e.message; }
+    };
+  });
+}
+function classForm(c){
+  const teachers = profiles.filter(p => p.role === "teacher" && p.active);
+  const students = profiles.filter(p => p.role === "student" && p.active);
+  const chosen = new Set(c ? roster.filter(r => r.class_id === c.id).map(r => r.student_id) : []);
+  modal(`<h3>${c ? t("edit") : t("addClass").replace("+ ","")}</h3>
+    <label>${t("title")}</label><input id="ti" value="${esc(c?.title)}">
+    <label>${t("subject")}</label><input id="su" value="${esc(c?.subject)}">
+    <label>${t("teacher")}</label><select id="te"><option value="">${t("noTeacher")}</option>${teachers.map(p=>`<option value="${p.id}" ${c?.teacher_id===p.id?"selected":""}>${esc(p.full_name)} (${esc(p.username)})</option>`).join("")}</select>
+    <div class="grid2">
+      <div><label>${t("time")}</label><input id="tm" type="datetime-local" value="${toLocalInput(c?.scheduled_at)}"></div>
+      <div><label>${t("duration")}</label><input id="du" type="number" min="5" max="600" value="${c?.duration_min || 60}"></div>
+    </div>
+    <label>${t("studentsMax")}</label>
+    <div class="checks">${students.length ? students.map(s=>`<label><input type="checkbox" value="${s.id}" ${chosen.has(s.id)?"checked":""}> ${esc(s.full_name)} <span class="muted">(${esc(s.username)})</span></label>`).join("") : `<div class="empty">${t("none")}</div>`}</div>
+    <div class="err" id="fe"></div>
+    <div class="foot"><button class="btn ghost" id="c">${t("cancel")}</button><button class="btn" id="s">${t("save")}</button></div>`, m => {
+    m.querySelectorAll(".checks input").forEach(cb => cb.onchange = () => {
+      if (m.querySelectorAll(".checks input:checked").length > 3) { cb.checked = false; m.querySelector("#fe").textContent = t("max3"); }
+    });
+    m.querySelector("#c").onclick = closeModal;
+    m.querySelector("#s").onclick = async ev => {
+      const fe = m.querySelector("#fe"); fe.textContent = "";
+      const row = {
+        title: m.querySelector("#ti").value.trim(), subject: m.querySelector("#su").value.trim() || null,
+        teacher_id: m.querySelector("#te").value || null,
+        scheduled_at: new Date(m.querySelector("#tm").value).toISOString(),
+        duration_min: parseInt(m.querySelector("#du").value) || 60
+      };
+      if (!row.title) { fe.textContent = t("title") + "?"; return; }
+      if (!row.teacher_id) { fe.textContent = t("noTeacher"); return; }
+      ev.target.disabled = true;
+      let id = c?.id, error;
+      if (c) ({ error } = await sb.from("classes").update(row).eq("id", c.id));
+      else { const r = await sb.from("classes").insert(row).select("id").single(); error = r.error; id = r.data?.id; }
+      if (!error) {
+        const ids = [...m.querySelectorAll(".checks input:checked")].map(x => x.value);
+        ({ error } = await sb.from("class_students").delete().eq("class_id", id));
+        if (!error && ids.length) ({ error } = await sb.from("class_students").insert(ids.map(sid => ({ class_id:id, student_id:sid }))));
+      }
+      if (error) { fe.textContent = error.message; ev.target.disabled = false; return; }
+      closeModal(); toast(t("saved")); await loadAll(); render();
+    };
+  });
+}
+async function chatView(cid){
+  const c = classes.find(x => x.id === cid);
+  const { data } = await sb.from("messages").select("*").eq("class_id", cid).order("created_at").limit(500);
+  const line = msg => `<div class="msg"><b>${esc(byId(msg.sender_id)?.full_name || "?")}</b><span class="t">${fmtTime(msg.created_at)}</span><div>${esc(msg.body)}</div></div>`;
+  modal(`<h3>${t("chat")} — ${esc(c.title)}</h3><div class="chatlog" id="cl">${(data||[]).map(line).join("") || `<div class="empty">${t("noMessages")}</div>`}</div>
+    <div class="foot"><button class="btn ghost" id="c">${t("close")}</button></div>`, m => {
+    m.querySelector("#c").onclick = closeModal;
+    const cl = m.querySelector("#cl"); cl.scrollTop = cl.scrollHeight;
+    chatChannel = sb.channel("admin-chat-"+cid).on("postgres_changes",{event:"INSERT",schema:"public",table:"messages",filter:`class_id=eq.${cid}`}, p => {
+      if (cl.querySelector(".empty")) cl.innerHTML = ""; cl.insertAdjacentHTML("beforeend", line(p.new)); cl.scrollTop = cl.scrollHeight;
+    }).subscribe();
+  });
+}
+
+boot();
+</script>
+</body>
+</html>

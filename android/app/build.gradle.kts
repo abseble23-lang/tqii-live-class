@@ -78,4 +78,6 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.getstream:stream-webrtc-android:1.3.8")
     implementation("com.google.mlkit:segmentation-selfie:16.0.0-beta6")
+    implementation("com.google.firebase:firebase-messaging:24.1.0")
+    implementation("io.coil-kt:coil-compose:2.7.0")
 }

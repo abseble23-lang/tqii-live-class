@@ -9,21 +9,47 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
 object Config {
-    const val SUPABASE_URL = "https://vxhmjftlxmpreolktwya.supabase.co"
-    const val SUPABASE_KEY = "sb_publishable_YoTBdksIVKVb0IB5yGzrtw_nTHYiR8h"
-    const val USER_DOMAIN = "users.tqiilive.app"
+    // TQII website database (talimul-quran / sky-school)
+    const val SUPABASE_URL = "https://zbyzvzutudyxhecuytzo.supabase.co"
+    const val SUPABASE_KEY = "sb_publishable_QzqTmCc_h8aUoXh_Eb2RdA_AnqQ--0i"
+    const val TEACHER_DOMAIN = "teachers.talimulquraninstitute.vercel.app"
+    const val STUDENT_DOMAIN = "students.talimulquraninstitute.vercel.app"
     const val CALL_CHANNEL = "live_call"
+    const val RING_CHANNEL = "incoming_call_v1"
+    const val MSG_CHANNEL = "chat_messages"
 }
 
 class App : Application() {
+    companion object { @Volatile var foreground = false; private var started = 0 }
+
     override fun onCreate() {
         super.onCreate()
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            override fun onActivityStarted(a: android.app.Activity) { started++; foreground = started > 0 }
+            override fun onActivityStopped(a: android.app.Activity) { started--; foreground = started > 0 }
+            override fun onActivityCreated(a: android.app.Activity, b: android.os.Bundle?) {}
+            override fun onActivityResumed(a: android.app.Activity) {}
+            override fun onActivityPaused(a: android.app.Activity) {}
+            override fun onActivitySaveInstanceState(a: android.app.Activity, b: android.os.Bundle) {}
+            override fun onActivityDestroyed(a: android.app.Activity) {}
+        })
         Api.init(this)
         L.init(this)
         val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(
-            NotificationChannel(Config.CALL_CHANNEL, "Live class", NotificationManager.IMPORTANCE_LOW)
-        )
+        nm.createNotificationChannel(NotificationChannel(Config.CALL_CHANNEL, "Live class", NotificationManager.IMPORTANCE_LOW))
+        val ring = NotificationChannel(Config.RING_CHANNEL, "Incoming calls", NotificationManager.IMPORTANCE_HIGH).apply {
+            setSound(
+                android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE),
+                android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
+            )
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 800, 600, 800, 600)
+            lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+        }
+        nm.createNotificationChannel(ring)
+        nm.createNotificationChannel(NotificationChannel(Config.MSG_CHANNEL, "Chat messages", NotificationManager.IMPORTANCE_HIGH))
+        if (!BuildConfig.IS_ADMIN) Push.init(this)
     }
 }
 
@@ -169,7 +195,53 @@ object L {
         "noTeachersYet" to "আগে শিক্ষক যোগ করুন",
         "people" to "জন",
         "classChat" to "ক্লাস চ্যাট",
-        "none" to "কিছু নেই"
+        "none" to "কিছু নেই",
+        "loginId" to "মোবাইল নম্বর",
+        "loginIdAdmin" to "ইমেইল বা মোবাইল নম্বর",
+        "myStudents" to "আমার ছাত্র-ছাত্রী",
+        "myTeacher" to "আমার শিক্ষক",
+        "call" to "কল",
+        "calls" to "কল ইতিহাস",
+        "todayAt" to "আজ ক্লাস",
+        "classDays" to "ক্লাসের দিন",
+        "incomingCall" to "লাইভ ক্লাসের কল আসছে",
+        "accept" to "ধরুন",
+        "decline" to "কেটে দিন",
+        "ringing" to "রিং হচ্ছে...",
+        "calling" to "কল করা হচ্ছে...",
+        "missed" to "মিসড কল",
+        "declined" to "কল কেটে দেওয়া হয়েছে",
+        "cancelled" to "বাতিল",
+        "noAnswer" to "কেউ ধরেনি",
+        "callFull" to "এই ক্লাসে ইতিমধ্যে ৪ জন আছেন",
+        "notLinked" to "আপনার অ্যাকাউন্ট এখনো কোনো শিক্ষক বা ছাত্রের সাথে যুক্ত নয়। অফিসে যোগাযোগ করুন।",
+        "attach" to "ফাইল",
+        "photo" to "ছবি",
+        "document" to "ফাইল/PDF",
+        "uploading" to "পাঠানো হচ্ছে...",
+        "open" to "খুলুন",
+        "fileTooBig" to "ফাইল ২৫ MB-এর বেশি হতে পারবে না",
+        "minutesShort" to "মি.",
+        "liveClasses" to "লাইভ ক্লাস",
+        "joinNow" to "ঢুকুন",
+        "studentLogins" to "ছাত্রের লগইন",
+        "createLogin" to "লগইন তৈরি",
+        "updateLogin" to "পাসওয়ার্ড বদলান",
+        "hasLogin" to "লগইন আছে",
+        "noLogin" to "লগইন নেই",
+        "access" to "ঢোকার অনুমতি",
+        "accessHint" to "যাদের অনুমতি দেবেন তারা যেকোনো লাইভ ক্লাসে ঢুকতে পারবেন",
+        "attendance" to "উপস্থিতি",
+        "reported" to "রিপোর্ট হয়েছে",
+        "inCall" to "জন কলে",
+        "noTeacher" to "শিক্ষক নেই",
+        "err_invalid_phone" to "সঠিক মোবাইল নম্বর দিন",
+        "err_phone_taken" to "এই নম্বরে আগে থেকেই লগইন আছে",
+        "allowNotif" to "কল আসলে রিং বাজার জন্য নোটিফিকেশনের অনুমতি দিন",
+        "allowFullScreen" to "লক স্ক্রিনে কল দেখানোর অনুমতি দিন",
+        "settingsBtn" to "সেটিংস খুলুন",
+        "teacherLabel" to "শিক্ষক",
+        "classTime" to "ক্লাসের সময়"
     )
 
     private val en = mapOf(
@@ -296,6 +368,52 @@ object L {
         "noTeachersYet" to "Add a teacher first",
         "people" to "people",
         "classChat" to "Class chat",
-        "none" to "Nothing here"
+        "none" to "Nothing here",
+        "loginId" to "Mobile number",
+        "loginIdAdmin" to "Email or mobile number",
+        "myStudents" to "My students",
+        "myTeacher" to "My teacher",
+        "call" to "Call",
+        "calls" to "Call history",
+        "todayAt" to "Class today",
+        "classDays" to "Class days",
+        "incomingCall" to "Incoming live class call",
+        "accept" to "Accept",
+        "decline" to "Decline",
+        "ringing" to "Ringing...",
+        "calling" to "Calling...",
+        "missed" to "Missed call",
+        "declined" to "Call declined",
+        "cancelled" to "Cancelled",
+        "noAnswer" to "No answer",
+        "callFull" to "This class already has 4 people",
+        "notLinked" to "Your account isn't linked to a teacher or student yet. Please contact the office.",
+        "attach" to "File",
+        "photo" to "Photo",
+        "document" to "File/PDF",
+        "uploading" to "Sending...",
+        "open" to "Open",
+        "fileTooBig" to "File must be 25 MB or smaller",
+        "minutesShort" to "min",
+        "liveClasses" to "Live classes",
+        "joinNow" to "Join",
+        "studentLogins" to "Student logins",
+        "createLogin" to "Create login",
+        "updateLogin" to "Change password",
+        "hasLogin" to "Has login",
+        "noLogin" to "No login",
+        "access" to "Join access",
+        "accessHint" to "People you allow can join any live class",
+        "attendance" to "Attendance",
+        "reported" to "Reported",
+        "inCall" to "in call",
+        "noTeacher" to "No teacher",
+        "err_invalid_phone" to "Enter a valid mobile number",
+        "err_phone_taken" to "This number already has a login",
+        "allowNotif" to "Allow notifications so calls can ring",
+        "allowFullScreen" to "Allow showing calls on the lock screen",
+        "settingsBtn" to "Open settings",
+        "teacherLabel" to "Teacher",
+        "classTime" to "Class time"
     )
 }

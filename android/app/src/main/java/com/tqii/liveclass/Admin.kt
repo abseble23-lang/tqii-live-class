@@ -1,17 +1,13 @@
 package com.tqii.liveclass
 
-import android.app.DatePickerDialog
-import android.app.TimePickerDialog
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -30,31 +26,28 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import org.json.JSONObject
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Date
-import java.util.Locale
 
-/** Data shared by all admin screens. */
+/** Data shared by the admin screens (all from the website database). */
 class AdminData {
-    var profiles by mutableStateOf<List<Profile>>(emptyList())
-    var classes by mutableStateOf<List<ClassItem>>(emptyList())
-    var roster by mutableStateOf<Map<String, List<String>>>(emptyMap())
+    var contacts by mutableStateOf<List<Contact>>(emptyList())
+    var calls by mutableStateOf<List<CallInfo>>(emptyList())
+    var students by mutableStateOf<List<StudentRow>>(emptyList())
+    var people by mutableStateOf<List<Person>>(emptyList())
+    var access by mutableStateOf<Set<String>>(emptySet())
     var loading by mutableStateOf(true)
     var error by mutableStateOf("")
-    fun byId(id: String?) = profiles.firstOrNull { it.id == id }
-    fun studentsOf(cid: String) = roster[cid].orEmpty().mapNotNull { byId(it) }
 
     suspend fun load() {
         try {
             if (Api.me == null) Api.loadMe()
-            val p = Api.profiles(); val c = Api.classes(); val r = Api.roster()
-            profiles = p.values.toList(); classes = c; roster = r; error = ""
+            contacts = Api.contacts()
+            calls = Api.recentCalls(100)
+            students = Api.students()
+            people = Api.people()
+            access = try { Api.accessList() } catch (_: Exception) { emptySet() }
+            error = ""
         } catch (e: Exception) { error = L.t("netError") }
         loading = false
     }
@@ -70,14 +63,12 @@ fun errText(e: Exception): String {
 fun AdminRoot(onLogout: () -> Unit) {
     val data = remember { AdminData() }
     val scope = rememberCoroutineScope()
+    val act = LocalContext.current as MainActivity
     var tab by remember { mutableIntStateOf(0) }
-    var editClass by remember { mutableStateOf<ClassItem?>(null) }
-    var newClass by remember { mutableStateOf(false) }
-    var newUserRole by remember { mutableStateOf<String?>(null) }
-    var chatFor by remember { mutableStateOf<ClassItem?>(null) }
+    var chatFor by remember { mutableStateOf<Contact?>(null) }
     var toast by remember { mutableStateOf("") }
 
-    LaunchedEffect(Unit) { while (true) { data.load(); delay(15_000) } }
+    LaunchedEffect(Unit) { while (true) { data.load(); delay(10_000) } }
     LaunchedEffect(toast) { if (toast.isNotEmpty()) { delay(2200); toast = "" } }
     fun reload() = scope.launch { data.load() }
 
@@ -87,47 +78,40 @@ fun AdminRoot(onLogout: () -> Unit) {
         return
     }
 
+    fun join(c: CallInfo) = act.openCall(c.id, c.teacherId, c.studentId, "${c.teacherName} · ${c.studentName}", outgoing = false)
+    fun startFor(c: Contact) = scope.launch {
+        try {
+            val id = Api.startCall(c.teacherId, c.studentId)
+            act.openCall(id, c.teacherId, c.studentId, "${c.teacherName} · ${c.studentName}", outgoing = true)
+        } catch (e: Exception) { toast = errText(e) }
+    }
+
     Box(Modifier.fillMaxSize().background(Ivory)) {
         Column(Modifier.fillMaxSize()) {
-            BrandHeader("TQII Admin", Api.me?.fullName) {
+            BrandHeader("TQII Admin", Api.me?.name) {
                 IconButton(onClick = { reload() }) { Icon(Icons.Filled.Refresh, null, tint = Ivory) }
             }
             Box(Modifier.weight(1f)) {
                 when (tab) {
-                    0 -> AdminDashboard(data, onOpen = { editClass = it }, onChat = { chatFor = it })
-                    1 -> AdminClasses(data, onEdit = { editClass = it }, onChat = { chatFor = it }, onChanged = { reload() }, onToast = { toast = it })
-                    2 -> AdminUsers(data, "teacher", onChanged = { reload() }, onToast = { toast = it })
-                    3 -> AdminUsers(data, "student", onChanged = { reload() }, onToast = { toast = it })
-                    else -> AdminMore(data, onLogout, onChanged = { reload() }, onToast = { toast = it })
-                }
-                // floating action button
-                val fab: (() -> Unit)? = when (tab) {
-                    0, 1 -> ({ newClass = true })
-                    2 -> ({ newUserRole = "teacher" })
-                    3 -> ({ newUserRole = "student" })
-                    else -> null
-                }
-                if (fab != null) {
-                    Box(
-                        Modifier.align(Alignment.BottomEnd).padding(18.dp).size(60.dp).clip(RoundedCornerShape(20.dp))
-                            .background(GoldGradient).clickable { fab() },
-                        contentAlignment = Alignment.Center
-                    ) { Icon(Icons.Filled.Add, null, tint = Night, modifier = Modifier.size(30.dp)) }
+                    0 -> AdminLive(data, onJoin = { join(it) }, onCall = { startFor(it) }, onChat = { chatFor = it })
+                    1 -> AdminStudents(data, onChanged = { reload() }, onToast = { toast = it })
+                    2 -> AdminCalls(data)
+                    3 -> AdminAccess(data, onChanged = { reload() }, onToast = { toast = it })
+                    else -> AdminMore(onLogout, onToast = { toast = it })
                 }
             }
             NavigationBar(containerColor = Color.White, tonalElevation = 0.dp, modifier = Modifier.border(1.dp, Line)) {
-                val items = listOf(
-                    Triple(Icons.Filled.Dashboard, "dashboard", 0),
-                    Triple(Icons.Filled.CalendarMonth, "classes", 1),
-                    Triple(Icons.Filled.School, "teachers", 2),
-                    Triple(Icons.Filled.Groups, "students", 3),
+                listOf(
+                    Triple(Icons.Filled.Sensors, "liveClasses", 0),
+                    Triple(Icons.Filled.Groups, "studentLogins", 1),
+                    Triple(Icons.Filled.History, "calls", 2),
+                    Triple(Icons.Filled.VerifiedUser, "access", 3),
                     Triple(Icons.Filled.Settings, "settings", 4),
-                )
-                items.forEach { (icon, key, i) ->
+                ).forEach { (icon, key, i) ->
                     NavigationBarItem(
                         selected = tab == i, onClick = { tab = i },
                         icon = { Icon(icon, null) },
-                        label = { Text(L.t(key), fontSize = 11.sp, maxLines = 1) },
+                        label = { Text(L.t(key), fontSize = 10.sp, maxLines = 1) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = Night, selectedTextColor = Night, indicatorColor = GoldSoft,
                             unselectedIconColor = Muted, unselectedTextColor = Muted
@@ -143,59 +127,72 @@ fun AdminRoot(onLogout: () -> Unit) {
             )
         }
     }
-
-    if (newClass || editClass != null) {
-        ClassEditor(data, editClass, onClose = { newClass = false; editClass = null }, onSaved = {
-            newClass = false; editClass = null; toast = L.t("saved"); reload()
-        })
-    }
-    newUserRole?.let { role ->
-        UserEditor(role, onClose = { newUserRole = null }, onSaved = { newUserRole = null; toast = L.t("saved"); reload() })
-    }
 }
 
-// ---------------- Dashboard ----------------
+// ---------------- Live now + today ----------------
 @Composable
-fun AdminDashboard(data: AdminData, onOpen: (ClassItem) -> Unit, onChat: (ClassItem) -> Unit) {
-    val live = data.classes.filter { it.status == "live" }
-    val today = data.classes.filter {
-        val f = SimpleDateFormat("yyyyMMdd", Locale.US); f.format(Date(it.scheduledAt)) == f.format(Date())
-    }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 100.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+fun AdminLive(data: AdminData, onJoin: (CallInfo) -> Unit, onCall: (Contact) -> Unit, onChat: (Contact) -> Unit) {
+    val live = data.calls.filter { it.status == "active" || it.status == "ringing" }
+    val today = todayKey()
+    val todays = data.contacts.filter { today in it.classDays }.sortedBy { it.classTime ?: "99" }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 40.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    BigStat(L.t("liveNow"), live.size, Icons.Filled.Sensors, LiveRed, Modifier.weight(1f), dark = true)
-                    BigStat(L.t("todayClasses"), today.size, Icons.Filled.Today, GoldDeep, Modifier.weight(1f))
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    BigStat(L.t("totalTeachers"), data.profiles.count { it.role == "teacher" }, Icons.Filled.School, GoldDeep, Modifier.weight(1f))
-                    BigStat(L.t("totalStudents"), data.profiles.count { it.role == "student" }, Icons.Filled.Groups, GoldDeep, Modifier.weight(1f))
-                }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                BigStat(L.t("liveNow"), live.size, Icons.Filled.Sensors, Modifier.weight(1f), dark = true)
+                BigStat(L.t("todayClasses"), todays.size, Icons.Filled.Today, Modifier.weight(1f))
+                BigStat(L.t("totalStudents"), data.students.count { it.status == "active" }, Icons.Filled.Groups, Modifier.weight(1f))
             }
         }
         if (data.error.isNotEmpty()) item { Text(data.error, color = LiveRed) }
         item { SectionTitle(L.t("liveNow"), Modifier.padding(top = 6.dp)) }
         if (live.isEmpty()) item { EmptyCard() }
-        items(live, key = { "l" + it.id }) { AdminClassRow(data, it, onClick = { onOpen(it) }, onChat = { onChat(it) }) }
+        items(live, key = { "l" + it.id }) { c ->
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Night).border(1.dp, Gold, RoundedCornerShape(18.dp)).padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) { StatusPill(c.status); Spacer(Modifier.width(8.dp)); Text("${c.inCall} ${L.t("inCall")}", color = GoldLight, fontSize = 12.sp) }
+                    Spacer(Modifier.height(6.dp))
+                    Text(c.teacherName, color = Ivory, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("→ " + c.studentName, color = Color(0xCCFFFFFF), fontSize = 13.sp, maxLines = 1)
+                    Text(fmtTime(c.answeredAt.takeIf { it > 0 } ?: c.createdAt), color = Color(0x99FFFFFF), fontSize = 11.sp)
+                }
+                GoldButton(L.t("joinNow"), Modifier.width(96.dp).height(44.dp)) { onJoin(c) }
+            }
+        }
         item { SectionTitle(L.t("todayClasses"), Modifier.padding(top = 6.dp)) }
-        if (today.isEmpty()) item { EmptyCard() }
-        items(today, key = { "t" + it.id }) { AdminClassRow(data, it, onClick = { onOpen(it) }, onChat = { onChat(it) }) }
+        if (todays.isEmpty()) item { EmptyCard() }
+        items(todays, key = { "t" + it.teacherId + it.studentId }) { c ->
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.White).border(1.dp, Line, RoundedCornerShape(18.dp)).padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.width(70.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Filled.Schedule, null, tint = GoldDeep)
+                    Text(time12(c.classTime), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Ink)
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(c.studentName, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("👤 " + c.teacherName, fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                IconButton(onClick = { onChat(c) }) { Icon(Icons.AutoMirrored.Filled.Chat, null, tint = GoldDeep) }
+                IconButton(onClick = { onCall(c) }) { Icon(Icons.Filled.Videocam, null, tint = GoldDeep) }
+            }
+        }
     }
 }
 
 @Composable
-fun BigStat(label: String, n: Int, icon: ImageVector, color: Color, modifier: Modifier, dark: Boolean = false) {
+fun BigStat(label: String, n: Int, icon: ImageVector, modifier: Modifier, dark: Boolean = false) {
     Column(
         modifier.clip(RoundedCornerShape(20.dp)).background(if (dark) Night else Color.White)
-            .border(1.dp, if (dark) Gold else Line, RoundedCornerShape(20.dp)).padding(16.dp)
+            .border(1.dp, if (dark) Gold else Line, RoundedCornerShape(20.dp)).padding(14.dp)
     ) {
-        Box(Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).background(if (dark) Night3 else GoldSoft), contentAlignment = Alignment.Center) {
-            Icon(icon, null, tint = if (dark) GoldLight else GoldDeep, modifier = Modifier.size(20.dp))
-        }
-        Spacer(Modifier.height(10.dp))
-        Text("$n", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = if (dark) (if (n > 0) LiveRed else Ivory) else Ink)
-        Text(label, fontSize = 12.sp, color = if (dark) Color(0xAAFFFFFF) else Muted)
+        Icon(icon, null, tint = if (dark) GoldLight else GoldDeep, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.height(6.dp))
+        Text("$n", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = if (dark) (if (n > 0) LiveRed else Ivory) else Ink)
+        Text(label, fontSize = 11.sp, color = if (dark) Color(0xAAFFFFFF) else Muted, maxLines = 1)
     }
 }
 
@@ -206,239 +203,13 @@ fun EmptyCard() {
     }
 }
 
+// ---------------- Student logins ----------------
 @Composable
-fun AdminClassRow(data: AdminData, c: ClassItem, onClick: () -> Unit, onChat: () -> Unit, menu: (@Composable () -> Unit)? = null) {
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.White)
-            .border(1.dp, if (c.status == "live") Gold else Line, RoundedCornerShape(18.dp)).clickable(onClick = onClick).padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(Modifier.width(54.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            val loc = if (L.lang == "bn") Locale("bn", "BD") else Locale.ENGLISH
-            Text(SimpleDateFormat("d", loc).format(Date(c.scheduledAt)), fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
-            Text(SimpleDateFormat("MMM", loc).format(Date(c.scheduledAt)), fontSize = 11.sp, color = GoldDeep)
-            Text(SimpleDateFormat("h:mm a", loc).format(Date(c.scheduledAt)), fontSize = 10.sp, color = Muted)
-        }
-        Box(Modifier.padding(horizontal = 10.dp).width(1.dp).height(48.dp).background(Line))
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(c.title, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                Spacer(Modifier.width(6.dp)); StatusPill(c.status)
-            }
-            Text("👤 " + (data.byId(c.teacherId)?.fullName ?: "—"), fontSize = 12.sp, color = Muted, maxLines = 1)
-            val st = data.studentsOf(c.id)
-            Text("👥 " + (if (st.isEmpty()) "—" else st.joinToString(", ") { it.fullName }), fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        IconButton(onClick = onChat) { Icon(Icons.AutoMirrored.Filled.Chat, null, tint = GoldDeep) }
-        menu?.invoke()
-    }
-}
-
-// ---------------- Classes ----------------
-@Composable
-fun AdminClasses(data: AdminData, onEdit: (ClassItem) -> Unit, onChat: (ClassItem) -> Unit, onChanged: () -> Unit, onToast: (String) -> Unit) {
-    var filter by remember { mutableStateOf("upcoming") }
-    var confirmDel by remember { mutableStateOf<ClassItem?>(null) }
-    val scope = rememberCoroutineScope()
-    val list = when (filter) {
-        "upcoming" -> data.classes.filter { it.status == "scheduled" }
-        "live" -> data.classes.filter { it.status == "live" }
-        "ended" -> data.classes.filter { it.status == "ended" }.sortedByDescending { it.scheduledAt }
-        else -> data.classes.sortedByDescending { it.scheduledAt }
-    }
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("upcoming", "live", "ended", "all").forEach { k -> Chip(L.t(if (k == "live") "liveNow" else k), filter == k) { filter = k } }
-        }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 0.dp, 16.dp, 100.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (list.isEmpty()) item { EmptyCard() }
-            items(list, key = { it.id }) { c ->
-                AdminClassRow(data, c, onClick = { onEdit(c) }, onChat = { onChat(c) }) {
-                    var open by remember { mutableStateOf(false) }
-                    Box {
-                        IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, null, tint = Muted) }
-                        DropdownMenu(open, { open = false }, containerColor = Color.White) {
-                            DropdownMenuItem({ Text(L.t("edit")) }, { open = false; onEdit(c) }, leadingIcon = { Icon(Icons.Filled.Edit, null) })
-                            if (c.status == "live") DropdownMenuItem({ Text(L.t("endClass")) }, {
-                                open = false
-                                scope.launch { try { Api.setStatus(c.id, "ended"); onChanged() } catch (e: Exception) { onToast(errText(e)) } }
-                            }, leadingIcon = { Icon(Icons.Filled.StopCircle, null) })
-                            DropdownMenuItem({ Text(L.t("delete"), color = LiveRed) }, { open = false; confirmDel = c },
-                                leadingIcon = { Icon(Icons.Filled.Delete, null, tint = LiveRed) })
-                        }
-                    }
-                }
-            }
-        }
-    }
-    confirmDel?.let { c ->
-        ConfirmDialog(L.t("confirmDelete"), c.title, onDismiss = { confirmDel = null }) {
-            confirmDel = null
-            scope.launch { try { Api.deleteClass(c.id); onChanged() } catch (e: Exception) { onToast(errText(e)) } }
-        }
-    }
-}
-
-@Composable
-fun ConfirmDialog(title: String, text: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss, containerColor = Color.White,
-        title = { Text(title, fontWeight = FontWeight.Bold) }, text = { Text(text, color = Muted) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(L.t("delete"), color = LiveRed, fontWeight = FontWeight.Bold) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(L.t("cancel"), color = Muted) } }
-    )
-}
-
-@Composable
-fun FullDialog(title: String, onClose: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        Column(Modifier.fillMaxSize().background(Ivory)) {
-            Box(Modifier.fillMaxWidth().background(NightGradient).statusBarsPadding()) {
-                Row(Modifier.fillMaxWidth().padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onClose) { Icon(Icons.Filled.Close, null, tint = Ivory) }
-                    Text(title, color = Ivory, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                    Logo(34.dp); Spacer(Modifier.width(10.dp))
-                }
-                Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(2.dp).background(GoldGradient))
-            }
-            Column(
-                Modifier.weight(1f).verticalScroll(rememberScrollState()).imePadding().navigationBarsPadding().padding(18.dp),
-                content = content
-            )
-        }
-    }
-}
-
-@Composable
-fun FieldLabel(text: String) { Text(text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Muted, modifier = Modifier.padding(top = 14.dp, bottom = 6.dp)) }
-
-@Composable
-fun ClassEditor(data: AdminData, existing: ClassItem?, onClose: () -> Unit, onSaved: () -> Unit) {
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var title by remember { mutableStateOf(existing?.title ?: "") }
-    var subject by remember { mutableStateOf(existing?.subject ?: "") }
-    var teacherId by remember { mutableStateOf(existing?.teacherId) }
-    val cal = remember {
-        Calendar.getInstance().apply {
-            if (existing != null) timeInMillis = existing.scheduledAt
-            else { add(Calendar.HOUR_OF_DAY, 1); set(Calendar.MINUTE, 0) }
-            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-        }
-    }
-    var whenMs by remember { mutableLongStateOf(cal.timeInMillis) }
-    var duration by remember { mutableIntStateOf(existing?.durationMin ?: 60) }
-    val chosen = remember { mutableStateListOf<String>().apply { if (existing != null) addAll(data.roster[existing.id].orEmpty()) } }
-    var err by remember { mutableStateOf("") }
-    var busy by remember { mutableStateOf(false) }
-    val teachers = data.profiles.filter { it.role == "teacher" && it.active }
-    val students = data.profiles.filter { it.role == "student" && it.active }
-    val loc = if (L.lang == "bn") Locale("bn", "BD") else Locale.ENGLISH
-
-    FullDialog(if (existing == null) L.t("newClass") else L.t("editClass"), onClose) {
-        FieldLabel(L.t("title"))
-        OutlinedTextField(title, { title = it }, singleLine = true, shape = RoundedCornerShape(14.dp), colors = fieldColors(), modifier = Modifier.fillMaxWidth())
-        FieldLabel(L.t("subject"))
-        OutlinedTextField(subject, { subject = it }, singleLine = true, shape = RoundedCornerShape(14.dp), colors = fieldColors(), modifier = Modifier.fillMaxWidth())
-
-        FieldLabel(L.t("selectTeacher"))
-        if (teachers.isEmpty()) Text(L.t("noTeachersYet"), color = LiveRed, fontSize = 13.sp)
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            teachers.forEach { t -> PersonPick(t, teacherId == t.id) { teacherId = t.id } }
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Column(Modifier.weight(1f)) {
-                FieldLabel(L.t("date"))
-                PickerBox(Icons.Filled.Event, SimpleDateFormat("d MMM yyyy", loc).format(Date(whenMs))) {
-                    val c = Calendar.getInstance().apply { timeInMillis = whenMs }
-                    DatePickerDialog(ctx, { _, y, m, d -> c.set(y, m, d); whenMs = c.timeInMillis }, c.get(Calendar.YEAR), c.get(Calendar.MONTH), c.get(Calendar.DAY_OF_MONTH)).show()
-                }
-            }
-            Column(Modifier.weight(1f)) {
-                FieldLabel(L.t("time"))
-                PickerBox(Icons.Filled.Schedule, SimpleDateFormat("h:mm a", loc).format(Date(whenMs))) {
-                    val c = Calendar.getInstance().apply { timeInMillis = whenMs }
-                    TimePickerDialog(ctx, { _, h, min -> c.set(Calendar.HOUR_OF_DAY, h); c.set(Calendar.MINUTE, min); whenMs = c.timeInMillis },
-                        c.get(Calendar.HOUR_OF_DAY), c.get(Calendar.MINUTE), false).show()
-                }
-            }
-        }
-
-        FieldLabel(L.t("duration"))
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(30, 45, 60, 90, 120).forEach { d -> Chip("$d ${L.t("minutes")}", duration == d) { duration = d } }
-        }
-
-        FieldLabel(L.t("studentsMax") + "  (${chosen.size}/3)")
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            students.forEach { s ->
-                PersonPick(s, s.id in chosen, check = true) {
-                    if (s.id in chosen) chosen.remove(s.id)
-                    else if (chosen.size >= 3) err = L.t("max3") else { chosen.add(s.id); err = "" }
-                }
-            }
-        }
-
-        if (err.isNotEmpty()) Text(err, color = LiveRed, fontSize = 13.sp, modifier = Modifier.padding(top = 12.dp))
-        Spacer(Modifier.height(20.dp))
-        GoldButton(L.t("save"), Modifier.fillMaxWidth(), loading = busy) {
-            if (title.isBlank()) { err = L.t("needTitle"); return@GoldButton }
-            if (teacherId == null) { err = L.t("needTeacher"); return@GoldButton }
-            busy = true; err = ""
-            scope.launch {
-                try {
-                    val row = JSONObject().put("title", title.trim()).put("subject", if (subject.isBlank()) JSONObject.NULL else subject.trim())
-                        .put("teacher_id", teacherId).put("scheduled_at", Api.isoOf(whenMs)).put("duration_min", duration)
-                    val id = if (existing != null) { Api.updateClass(existing.id, row); existing.id } else Api.createClass(row)
-                    Api.setRoster(id, chosen.toList())
-                    onSaved()
-                } catch (e: Exception) { err = errText(e) }
-                busy = false
-            }
-        }
-        Spacer(Modifier.height(30.dp))
-    }
-}
-
-@Composable
-fun PickerBox(icon: ImageVector, text: String, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().height(54.dp).clip(RoundedCornerShape(14.dp)).background(Color.White)
-            .border(1.dp, Line, RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(icon, null, tint = GoldDeep, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp))
-        Text(text, color = Ink, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-@Composable
-fun PersonPick(p: Profile, selected: Boolean, check: Boolean = false, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(if (selected) Night else Color.White)
-            .border(1.dp, if (selected) Gold else Line, RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        InitialAvatar(p.fullName, 36.dp, dark = !selected)
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(p.fullName, color = if (selected) Ivory else Ink, fontWeight = FontWeight.SemiBold)
-            Text("@" + p.username, color = if (selected) GoldLight else Muted, fontSize = 12.sp)
-        }
-        if (selected) Icon(if (check) Icons.Filled.CheckBox else Icons.Filled.CheckCircle, null, tint = GoldLight)
-        else if (check) Icon(Icons.Filled.CheckBoxOutlineBlank, null, tint = Line)
-    }
-}
-
-// ---------------- Users ----------------
-@Composable
-fun AdminUsers(data: AdminData, role: String, onChanged: () -> Unit, onToast: (String) -> Unit) {
+fun AdminStudents(data: AdminData, onChanged: () -> Unit, onToast: (String) -> Unit) {
     var q by remember { mutableStateOf("") }
-    var resetFor by remember { mutableStateOf<Profile?>(null) }
-    var delFor by remember { mutableStateOf<Profile?>(null) }
-    val scope = rememberCoroutineScope()
-    val list = data.profiles.filter { it.role == role && (q.isBlank() || (it.fullName + " " + it.username + " " + (it.phone ?: "")).contains(q, true)) }
+    var editing by remember { mutableStateOf<StudentRow?>(null) }
+    val list = data.students.filter { it.status in setOf("active", "paused") && (q.isBlank() || (it.name + " " + (it.whatsapp ?: "")).contains(q, true)) }
+    val teacherName = data.contacts.associate { it.teacherId to it.teacherName }
     Column(Modifier.fillMaxSize()) {
         OutlinedTextField(
             q, { q = it }, placeholder = { Text(L.t("search")) }, singleLine = true,
@@ -446,90 +217,62 @@ fun AdminUsers(data: AdminData, role: String, onChanged: () -> Unit, onToast: (S
             shape = RoundedCornerShape(16.dp), colors = fieldColors(),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)
         )
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 0.dp, 16.dp, 100.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 0.dp, 16.dp, 40.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (list.isEmpty()) item { EmptyCard() }
-            items(list, key = { it.id }) { p ->
-                UserRow(p,
-                    onReset = { resetFor = p },
-                    onToggle = {
-                        scope.launch {
-                            try { Api.adminUsers(JSONObject().put("action", "set_active").put("user_id", p.id).put("active", !p.active)); onChanged() }
-                            catch (e: Exception) { onToast(errText(e)) }
+            items(list, key = { it.id }) { s ->
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.White).border(1.dp, Line, RoundedCornerShape(18.dp)).padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    InitialAvatar(s.name, 44.dp, dark = true)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(s.name, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(s.whatsapp ?: "", fontSize = 12.sp, color = Muted)
+                        Text("👤 " + (s.teacherId?.let { teacherName[it] } ?: L.t("noTeacher")), fontSize = 11.sp, color = Muted, maxLines = 1)
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            if (s.profileId != null) L.t("hasLogin") else L.t("noLogin"),
+                            color = if (s.profileId != null) Success else GoldDeep, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clip(RoundedCornerShape(50)).background(if (s.profileId != null) Color(0xFFE3F4EA) else GoldSoft).padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                        TextButton(onClick = { editing = s }) {
+                            Text(if (s.profileId != null) L.t("updateLogin") else L.t("createLogin"), color = GoldDeep, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
-                    },
-                    onDelete = { delFor = p })
-            }
-        }
-    }
-    resetFor?.let { p -> ResetPwDialog(p, onClose = { resetFor = null }, onDone = { resetFor = null; onToast(L.t("saved")) }) }
-    delFor?.let { p ->
-        ConfirmDialog(L.t("confirmDelete"), p.fullName + " (@" + p.username + ")", onDismiss = { delFor = null }) {
-            delFor = null
-            scope.launch {
-                try { Api.adminUsers(JSONObject().put("action", "delete").put("user_id", p.id)); onChanged() }
-                catch (e: Exception) { onToast(errText(e)) }
-            }
-        }
-    }
-}
-
-@Composable
-fun UserRow(p: Profile, onReset: () -> Unit, onToggle: () -> Unit, onDelete: () -> Unit) {
-    val self = p.id == Api.userId
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.White).border(1.dp, Line, RoundedCornerShape(18.dp)).padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        InitialAvatar(p.fullName, 44.dp, dark = true)
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(p.fullName, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
-            Text("@" + p.username + (p.phone?.let { " · $it" } ?: ""), fontSize = 12.sp, color = Muted, maxLines = 1)
-        }
-        Text(
-            if (p.active) L.t("active") else L.t("inactive"),
-            color = if (p.active) Success else LiveRed, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.clip(RoundedCornerShape(50)).background(if (p.active) Color(0xFFE3F4EA) else Color(0xFFFDE4E4)).padding(horizontal = 8.dp, vertical = 3.dp)
-        )
-        var open by remember { mutableStateOf(false) }
-        Box {
-            IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, null, tint = Muted) }
-            DropdownMenu(open, { open = false }, containerColor = Color.White) {
-                DropdownMenuItem({ Text(L.t("resetPw")) }, { open = false; onReset() }, leadingIcon = { Icon(Icons.Filled.Key, null) })
-                if (!self) {
-                    DropdownMenuItem({ Text(if (p.active) L.t("disable") else L.t("enable")) }, { open = false; onToggle() },
-                        leadingIcon = { Icon(if (p.active) Icons.Filled.Block else Icons.Filled.CheckCircle, null) })
-                    DropdownMenuItem({ Text(L.t("delete"), color = LiveRed) }, { open = false; onDelete() },
-                        leadingIcon = { Icon(Icons.Filled.Delete, null, tint = LiveRed) })
+                    }
                 }
             }
         }
     }
+    editing?.let { s -> StudentLoginDialog(s, onClose = { editing = null }, onDone = { editing = null; onToast(L.t("saved")); onChanged() }) }
 }
 
 @Composable
-fun ResetPwDialog(p: Profile, onClose: () -> Unit, onDone: () -> Unit) {
+fun StudentLoginDialog(s: StudentRow, onClose: () -> Unit, onDone: () -> Unit) {
+    var phone by remember { mutableStateOf(s.whatsapp ?: "") }
     var pw by remember { mutableStateOf("") }
     var err by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     AlertDialog(
         onDismissRequest = onClose, containerColor = Color.White,
-        title = { Text(L.t("resetPw"), fontWeight = FontWeight.Bold) },
+        title = { Text(if (s.profileId != null) L.t("updateLogin") else L.t("createLogin"), fontWeight = FontWeight.Bold) },
         text = {
             Column {
-                Text(p.fullName + " (@" + p.username + ")", color = Muted)
+                Text(s.name, color = Muted)
                 Spacer(Modifier.height(10.dp))
+                OutlinedTextField(phone, { phone = it }, label = { Text(L.t("loginId")) }, singleLine = true, shape = RoundedCornerShape(14.dp), colors = fieldColors())
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(pw, { pw = it }, label = { Text(L.t("newPw")) }, singleLine = true, shape = RoundedCornerShape(14.dp), colors = fieldColors())
                 if (err.isNotEmpty()) Text(err, color = LiveRed, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
             }
         },
         confirmButton = {
             GoldButton(L.t("save"), Modifier.width(120.dp).height(44.dp), loading = busy) {
-                busy = true
+                busy = true; err = ""
                 scope.launch {
-                    try { Api.adminUsers(JSONObject().put("action", "reset_password").put("user_id", p.id).put("password", pw)); onDone() }
-                    catch (e: Exception) { err = errText(e) }
+                    try { Api.studentLogin(s.id, phone, pw); onDone() } catch (e: Exception) { err = errText(e) }
                     busy = false
                 }
             }
@@ -538,76 +281,79 @@ fun ResetPwDialog(p: Profile, onClose: () -> Unit, onDone: () -> Unit) {
     )
 }
 
+// ---------------- Call history with attendance ----------------
 @Composable
-fun UserEditor(role: String, onClose: () -> Unit, onSaved: () -> Unit) {
-    var name by remember { mutableStateOf("") }
-    var user by remember { mutableStateOf("") }
-    var pw by remember { mutableStateOf("") }
-    var phone by remember { mutableStateOf("") }
-    var err by remember { mutableStateOf("") }
-    var busy by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val titleKey = when (role) { "teacher" -> "newTeacher"; "admin" -> "newAdmin"; else -> "newStudent" }
-    FullDialog(L.t(titleKey), onClose) {
-        FieldLabel(L.t("name"))
-        OutlinedTextField(name, { name = it }, singleLine = true, shape = RoundedCornerShape(14.dp), colors = fieldColors(), modifier = Modifier.fillMaxWidth())
-        FieldLabel(L.t("username"))
-        OutlinedTextField(user, { user = it.trim().lowercase() }, singleLine = true, shape = RoundedCornerShape(14.dp), colors = fieldColors(),
-            leadingIcon = { Text("@", color = GoldDeep, fontWeight = FontWeight.Bold) }, modifier = Modifier.fillMaxWidth())
-        Text(L.t("userHint"), fontSize = 11.sp, color = Muted, modifier = Modifier.padding(top = 4.dp))
-        FieldLabel(L.t("password"))
-        OutlinedTextField(pw, { pw = it }, singleLine = true, shape = RoundedCornerShape(14.dp), colors = fieldColors(), modifier = Modifier.fillMaxWidth())
-        FieldLabel(L.t("phone"))
-        OutlinedTextField(phone, { phone = it }, singleLine = true, shape = RoundedCornerShape(14.dp), colors = fieldColors(), modifier = Modifier.fillMaxWidth())
-        if (err.isNotEmpty()) Text(err, color = LiveRed, fontSize = 13.sp, modifier = Modifier.padding(top = 12.dp))
-        Spacer(Modifier.height(22.dp))
-        GoldButton(L.t("save"), Modifier.fillMaxWidth(), loading = busy) {
-            busy = true; err = ""
-            scope.launch {
-                try {
-                    Api.adminUsers(JSONObject().put("action", "create").put("role", role).put("full_name", name)
-                        .put("username", user).put("password", pw).put("phone", phone))
-                    onSaved()
-                } catch (e: Exception) { err = errText(e) }
-                busy = false
+fun AdminCalls(data: AdminData) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 40.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (data.calls.isEmpty()) item { EmptyCard() }
+        items(data.calls, key = { it.id }) { c ->
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.White).border(1.dp, Line, RoundedCornerShape(18.dp)).padding(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(c.studentName, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
+                        Text("👤 " + c.teacherName, fontSize = 12.sp, color = Muted, maxLines = 1)
+                    }
+                    StatusPill(if (c.status in setOf("ended")) "ended" else c.status)
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Schedule, null, tint = Gold, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(4.dp))
+                    Text(fmtTime(c.createdAt), fontSize = 12.sp, color = Muted, modifier = Modifier.weight(1f))
+                    Text("${L.t("attendance")}: ${L.t("teacher")} ${c.teacherMinutes} · ${L.t("student")} ${c.studentMinutes} ${L.t("minutesShort")}", fontSize = 11.sp, color = Ink)
+                }
+                if (c.reported) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+                    Icon(Icons.Filled.TaskAlt, null, tint = Success, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(4.dp))
+                    Text(L.t("reported"), color = Success, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
             }
         }
     }
 }
 
-// ---------------- More / settings ----------------
+// ---------------- Join access ----------------
 @Composable
-fun AdminMore(data: AdminData, onLogout: () -> Unit, onChanged: () -> Unit, onToast: (String) -> Unit) {
+fun AdminAccess(data: AdminData, onChanged: () -> Unit, onToast: (String) -> Unit) {
+    val scope = rememberCoroutineScope()
+    val staff = data.people.filter { it.role != null && it.role != "super_admin" && it.active }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 40.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item { Text(L.t("accessHint"), color = Muted, fontSize = 13.sp) }
+        if (staff.isEmpty()) item { EmptyCard() }
+        items(staff, key = { it.id }) { p ->
+            val on = p.id in data.access
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.White).border(1.dp, if (on) Gold else Line, RoundedCornerShape(18.dp)).padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                InitialAvatar(p.name, 42.dp, dark = true)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(p.name, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text((if (p.role == "teacher") L.t("teacher") else L.t("admins")) + (p.phone?.let { " · $it" } ?: ""), fontSize = 12.sp, color = Muted)
+                }
+                Switch(
+                    checked = on,
+                    onCheckedChange = { v ->
+                        scope.launch { try { Api.setAccess(p.id, v); onChanged() } catch (e: Exception) { onToast(errText(e)) } }
+                    },
+                    colors = SwitchDefaults.colors(checkedThumbColor = Night, checkedTrackColor = Gold)
+                )
+            }
+        }
+    }
+}
+
+// ---------------- Settings ----------------
+@Composable
+fun AdminMore(onLogout: () -> Unit, onToast: (String) -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    var showAdmins by remember { mutableStateOf(false) }
-    var newAdmin by remember { mutableStateOf(false) }
     var changePw by remember { mutableStateOf(false) }
-    if (showAdmins) {
-        BackHandler { showAdmins = false }
-        Box(Modifier.fillMaxSize()) {
-            Column {
-                Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { showAdmins = false }) { Icon(Icons.Filled.ArrowBack, null) }
-                    SectionTitle(L.t("admins"))
-                }
-                AdminUsers(data, "admin", onChanged, onToast)
-            }
-            Box(
-                Modifier.align(Alignment.BottomEnd).padding(18.dp).size(60.dp).clip(RoundedCornerShape(20.dp)).background(GoldGradient).clickable { newAdmin = true },
-                contentAlignment = Alignment.Center
-            ) { Icon(Icons.Filled.PersonAdd, null, tint = Night) }
-        }
-        if (newAdmin) UserEditor("admin", onClose = { newAdmin = false }, onSaved = { newAdmin = false; onToast(L.t("saved")); onChanged() })
-        return
-    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(NightGradient).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Logo(90.dp)
-            Text(Api.me?.fullName ?: "", color = Ivory, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            Text("@" + (Api.me?.username ?: ""), color = GoldLight, fontSize = 13.sp)
+            Text(Api.me?.name ?: "", color = Ivory, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Text(if (Api.me?.isSuper == true) "প্রধান অ্যাডমিন" else L.t("admins"), color = GoldLight, fontSize = 13.sp)
         }
-        SettingRow(Icons.Filled.AdminPanelSettings, L.t("admins")) { showAdmins = true }
         SettingRow(Icons.Filled.Key, L.t("changePw")) { changePw = true }
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color.White).border(1.dp, Line, RoundedCornerShape(16.dp)).padding(14.dp),
@@ -621,8 +367,27 @@ fun AdminMore(data: AdminData, onLogout: () -> Unit, onChanged: () -> Unit, onTo
         Text("${L.t("version")} 1.0.${Updater.currentVersion(ctx)}", color = Muted, fontSize = 12.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp))
     }
     if (changePw) {
-        val me = Api.me
-        if (me != null) ResetPwDialog(me, onClose = { changePw = false }, onDone = { changePw = false; onToast(L.t("saved")) })
+        var pw by remember { mutableStateOf("") }
+        var err by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { changePw = false }, containerColor = Color.White,
+            title = { Text(L.t("changePw"), fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    OutlinedTextField(pw, { pw = it }, label = { Text(L.t("newPw")) }, singleLine = true, shape = RoundedCornerShape(14.dp), colors = fieldColors())
+                    if (err.isNotEmpty()) Text(err, color = LiveRed, fontSize = 13.sp)
+                }
+            },
+            confirmButton = {
+                GoldButton(L.t("save"), Modifier.width(120.dp).height(44.dp)) {
+                    if (pw.length < 8) { err = L.t("err_weak_password"); return@GoldButton }
+                    scope.launch {
+                        try { Api.changeMyPassword(pw); changePw = false; onToast(L.t("saved")) } catch (e: Exception) { err = errText(e) }
+                    }
+                }
+            },
+            dismissButton = { TextButton(onClick = { changePw = false }) { Text(L.t("cancel"), color = Muted) } }
+        )
     }
 }
 

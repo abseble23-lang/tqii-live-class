@@ -35,7 +35,7 @@ object Diag {
         val lines = synchronized(buf) { val l = buf.toList(); buf.clear(); l }
         if (lines.isEmpty()) return
         val arr = JSONArray()
-        lines.forEach { arr.put(JSONObject().put("class_id", classId).put("app_version", version).put("msg", it.take(3900))) }
+        lines.forEach { arr.put(JSONObject().put("call_id", classId).put("app_version", version).put("msg", it.take(3900))) }
         try { Api.insertLogs(arr.toString()) } catch (e: Exception) { Log.w("Diag", "flush failed", e) }
     }
 }

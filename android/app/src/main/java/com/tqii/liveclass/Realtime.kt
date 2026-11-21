@@ -18,26 +18,28 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicInteger
 
+/** Which database changes a channel listens to. filter like "id=eq.<uuid>" (optional). */
+data class PgListen(val table: String, val event: String = "*", val filter: String? = null)
+
 /**
- * Minimal Supabase Realtime client (Phoenix protocol) for ONE private channel "class:<id>".
- * Supports broadcast, presence and postgres_changes (INSERT on messages).
- * All callbacks are delivered on the main thread.
+ * Minimal Supabase Realtime client (Phoenix protocol) for ONE private channel.
+ * Supports broadcast, presence and postgres_changes. Callbacks arrive on the main thread.
  */
-class ClassChannel(
-    private val classId: String,
-    private val presence: JSONObject?,              // null = don't track presence
+class RtChannel(
+    private val channelTopic: String,
+    private val presence: JSONObject?,                 // null = don't track presence
+    private val listens: List<PgListen>,
     private val listener: Listener
 ) {
     interface Listener {
         fun onJoined() {}
         fun onBroadcast(event: String, payload: JSONObject) {}
         fun onPresence(online: Map<String, JSONObject>) {}
-        fun onNewMessage(msg: ChatMsg) {}
-        fun onClassChanged(record: JSONObject) {}
+        fun onChange(table: String, type: String, record: JSONObject) {}
         fun onConnection(connected: Boolean) {}
     }
 
-    private val topic = "realtime:class:$classId"
+    private val topic = "realtime:$channelTopic"
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val ref = AtomicInteger(1)
@@ -50,7 +52,7 @@ class ClassChannel(
 
     fun connect() {
         closed = false
-        connectSocketOnly()
+        connectSocket()
         startHeartbeat()
     }
 
@@ -66,10 +68,10 @@ class ClassChannel(
         if (closed) return
         val wait = minOf(10_000L, 1000L * (1 shl minOf(retry, 4)))
         retry++
-        scope.launch { delay(wait); if (!closed) connectSocketOnly() }
+        scope.launch { delay(wait); if (!closed) connectSocket() }
     }
 
-    private fun connectSocketOnly() {
+    private fun connectSocket() {
         scope.launch {
             val token = try { Api.token() } catch (e: Exception) { scheduleReconnect(); return@launch }
             val url = Config.SUPABASE_URL.replace("https://", "wss://") +
@@ -91,12 +93,8 @@ class ClassChannel(
                 tick++
                 ws?.send(JSONObject().put("topic", "phoenix").put("event", "heartbeat")
                     .put("payload", JSONObject()).put("ref", ref.getAndIncrement().toString()).toString())
-                // refresh the access token on the channel every ~20 minutes
                 if (tick % 48 == 0 && joined) {
-                    try {
-                        val tk = Api.token()
-                        push("access_token", JSONObject().put("access_token", tk))
-                    } catch (_: Exception) {}
+                    try { push("access_token", JSONObject().put("access_token", Api.token())) } catch (_: Exception) {}
                 }
             }
         }
@@ -104,12 +102,16 @@ class ClassChannel(
 
     private fun join(sock: WebSocket, token: String) {
         joinRef = ref.getAndIncrement().toString()
+        val pg = JSONArray()
+        listens.forEach { l ->
+            val o = JSONObject().put("event", l.event).put("schema", "public").put("table", l.table)
+            if (l.filter != null) o.put("filter", l.filter)
+            pg.put(o)
+        }
         val config = JSONObject()
             .put("broadcast", JSONObject().put("self", false).put("ack", false))
             .put("presence", JSONObject().put("key", Api.userId ?: "").put("enabled", presence != null))
-            .put("postgres_changes", JSONArray()
-                .put(JSONObject().put("event", "INSERT").put("schema", "public").put("table", "messages").put("filter", "class_id=eq.$classId"))
-                .put(JSONObject().put("event", "UPDATE").put("schema", "public").put("table", "classes").put("filter", "id=eq.$classId")))
+            .put("postgres_changes", pg)
             .put("private", true)
         val payload = JSONObject().put("config", config).put("access_token", token)
         sock.send(JSONObject().put("topic", topic).put("event", "phx_join").put("payload", payload)
@@ -138,6 +140,7 @@ class ClassChannel(
                         main.post { listener.onConnection(true); listener.onJoined() }
                     } else {
                         Log.w("Realtime", "join failed: $text")
+                        Diag.log("realtime join failed $channelTopic: ${text.take(300)}")
                         ws?.let { it.cancel(); onDrop(it) }
                     }
                 }
@@ -165,10 +168,8 @@ class ClassChannel(
             "postgres_changes" -> {
                 val data = payload.optJSONObject("data") ?: return
                 val rec = data.optJSONObject("record") ?: return
-                when (data.optString("table")) {
-                    "messages" -> { val msg = try { Api.parseMsg(rec) } catch (_: Exception) { null }; if (msg != null) main.post { listener.onNewMessage(msg) } }
-                    "classes" -> main.post { listener.onClassChanged(rec) }
-                }
+                val table = data.optString("table"); val type = data.optString("type")
+                main.post { listener.onChange(table, type, rec) }
             }
         }
     }

@@ -58,15 +58,22 @@ class PeerState(val uid: String, name: String, role: String) {
 
 class CallManager(
     private val ctx: Context,
-    val classId: String,
-    val isTeacher: Boolean,
-) : ClassChannel.Listener {
+    val callId: String,
+    val teacherId: String,
+    val studentId: String,
+) : RtChannel.Listener {
 
     companion object { var current: CallManager? = null }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     val myId: String = Api.userId ?: ""
-    val myName: String = Api.me?.fullName ?: ""
+    val myName: String = Api.me?.name ?: ""
+    val isTeacher: Boolean = Api.me?.teacherId == teacherId
+    val isStudent: Boolean = Api.me?.studentId == studentId
+    /** what the server says about this call: ringing | active | ended | missed | declined | cancelled | full */
+    val callStatus = mutableStateOf("ringing")
+    var callerIsMe = false
+    val canEndAll: Boolean get() = isTeacher || Api.me?.canJoinAny == true
 
     // ---- UI state ----
     val peers = mutableStateMapOf<String, PeerState>()
@@ -107,12 +114,13 @@ class CallManager(
     private val retries = HashMap<String, Int>()
     private val watchdogs = HashMap<String, Job>()
     val speakerOn = mutableStateOf(true)
-    private var channel: ClassChannel? = null
+    private var channel: RtChannel? = null
+    private var heartbeatJob: Job? = null
     private val audioManager = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     fun start() {
         current = this
-        Diag.start(ctx, classId)
+        Diag.start(ctx, callId)
         Diag.log("start me=$myId teacher=$isTeacher sdk=${Build.VERSION.SDK_INT} model=${Build.MODEL}")
         PeerConnectionFactory.initialize(
             PeerConnectionFactory.InitializationOptions.builder(ctx.applicationContext).createInitializationOptions()
@@ -138,19 +146,28 @@ class CallManager(
 
         scope.launch {
             names[myId] = myName
-            try {
-                Api.profiles().values.forEach { names[it.id] = it.fullName }
-            } catch (_: Exception) {}
             iceServers = Api.iceServers()
             Diag.log("ice servers: " + iceServers.joinToString { it.urls.joinToString("|") + (if (it.username.isNullOrEmpty()) "" else "(auth)") })
             try {
-                messages.addAll(Api.messages(classId))
+                messages.addAll(Api.messages(teacherId, studentId))
             } catch (_: Exception) {}
-            if (isTeacher) {
-                try { Api.setStatus(classId, "live") } catch (e: Exception) { Log.w("Call", "status", e) }
+            val role = if (isTeacher) "teacher" else if (isStudent) "student" else "admin"
+            val presence = JSONObject().put("uid", myId).put("name", myName).put("role", role)
+            channel = RtChannel(
+                "live-call:$callId", presence,
+                listOf(PgListen("live_calls", "UPDATE", "id=eq.$callId"), PgListen("live_messages", "INSERT", "teacher_id=eq.$teacherId")),
+                this@CallManager
+            ).also { it.connect() }
+            heartbeatJob = scope.launch {
+                while (true) {
+                    try {
+                        val r = Api.heartbeat(callId)
+                        val st = r.optString("status")
+                        if (st.isNotBlank()) onServerStatus(st)
+                    } catch (e: Exception) { Log.w("Call", "heartbeat", e) }
+                    delay(20_000)
+                }
             }
-            val presence = JSONObject().put("uid", myId).put("name", myName).put("role", if (isTeacher) "teacher" else "student")
-            channel = ClassChannel(classId, presence, this@CallManager).also { it.connect() }
         }
     }
 
@@ -266,8 +283,8 @@ class CallManager(
         if (body.isEmpty()) return
         scope.launch {
             try {
-                Api.sendMessage(classId, body)
-                val latest = Api.messages(classId)
+                Api.sendMessage(teacherId, studentId, body)
+                val latest = Api.messages(teacherId, studentId)
                 latest.forEach { m -> if (messages.none { it.id == m.id }) messages.add(m) }
             } catch (e: Exception) { Log.w("Call", "chat", e) }
         }
@@ -276,7 +293,7 @@ class CallManager(
     fun endForAll() {
         scope.launch {
             channel?.broadcast("end", JSONObject().put("from", myId))
-            try { Api.setStatus(classId, "ended") } catch (_: Exception) {}
+            try { Api.endCall(callId) } catch (e: Exception) { Log.w("Call", "end", e) }
             ended.value = true
         }
     }
@@ -334,15 +351,25 @@ class CallManager(
         }
     }
 
-    override fun onNewMessage(msg: ChatMsg) {
-        if (messages.none { it.id == msg.id }) {
-            messages.add(msg)
-            if (!chatOpen && msg.senderId != myId) unread.value = unread.value + 1
+    override fun onChange(table: String, type: String, record: JSONObject) {
+        when (table) {
+            "live_calls" -> record.optString("status").takeIf { it.isNotBlank() }?.let { onServerStatus(it) }
+            "live_messages" -> {
+                if (record.optString("student_id") != studentId) return
+                val msg = try { Api.parseMsg(record) } catch (_: Exception) { return }
+                if (messages.none { it.id == msg.id }) {
+                    messages.add(msg)
+                    if (!chatOpen && msg.senderId != myId) unread.value = unread.value + 1
+                }
+            }
         }
     }
 
-    override fun onClassChanged(record: JSONObject) {
-        if (record.optString("status") == "ended") ended.value = true
+    private fun onServerStatus(st: String) {
+        if (callStatus.value == st) return
+        callStatus.value = st
+        Diag.log("call status -> $st")
+        if (st in setOf("ended", "missed", "declined", "cancelled", "full")) ended.value = true
     }
 
     private fun signal(to: String, type: String, extra: JSONObject.() -> Unit) {
@@ -541,6 +568,12 @@ class CallManager(
 
     fun leave() {
         Diag.log("leave")
+        heartbeatJob?.cancel()
+        val id = callId
+        val ringingByMe = callStatus.value == "ringing"
+        CoroutineScope(Dispatchers.IO).launch {
+            try { if (ringingByMe) Api.rejectCall(id) else Api.leaveCall(id) } catch (_: Exception) {}
+        }
         kotlinx.coroutines.runBlocking { try { kotlinx.coroutines.withTimeout(1500) { Diag.flush() } } catch (_: Exception) {} }
         if (current === this) current = null
         channel?.close(); channel = null

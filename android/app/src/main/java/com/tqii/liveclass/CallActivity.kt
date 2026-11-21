@@ -70,8 +70,8 @@ class CallActivity : ComponentActivity() {
             showContent()
             return
         }
-        val classId = intent.getStringExtra("classId")
-        if (classId == null) { finish(); return }
+        val callId = intent.getStringExtra("callId")
+        if (callId == null) { finish(); return }
 
         val needed = mutableListOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
         if (Build.VERSION.SDK_INT >= 33) needed += Manifest.permission.POST_NOTIFICATIONS
@@ -80,11 +80,16 @@ class CallActivity : ComponentActivity() {
     }
 
     private fun begin() {
-        val classId = intent.getStringExtra("classId") ?: return finish()
+        val callId = intent.getStringExtra("callId") ?: return finish()
+        val teacherId = intent.getStringExtra("teacherId") ?: return finish()
+        val studentId = intent.getStringExtra("studentId") ?: return finish()
         val title = intent.getStringExtra("title") ?: ""
-        val teacher = intent.getBooleanExtra("teacher", false)
+        Push.cancelRing(this, callId)
         CallService.start(this, title)
-        manager = CallManager(applicationContext, classId, teacher).also { it.start() }
+        manager = CallManager(applicationContext, callId, teacherId, studentId).also {
+            it.callerIsMe = intent.getBooleanExtra("outgoing", false)
+            it.start()
+        }
         showContent()
     }
 
@@ -239,7 +244,12 @@ fun CallScreen(m: CallManager, title: String, onShare: () -> Unit, onLeave: () -
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(Icons.Filled.CheckCircle, null, tint = GoldLight, modifier = Modifier.size(56.dp))
                 Spacer(Modifier.height(12.dp))
-                Text(L.t("classEnded"), color = Color.White, fontSize = 20.sp)
+                Text(
+                    when (m.callStatus.value) {
+                        "missed" -> L.t("noAnswer"); "declined" -> L.t("declined"); "cancelled" -> L.t("cancelled")
+                        "full" -> L.t("callFull"); else -> L.t("classEnded")
+                    }, color = Color.White, fontSize = 20.sp
+                )
             }
         }
         return
@@ -284,7 +294,21 @@ fun CallScreen(m: CallManager, title: String, onShare: () -> Unit, onLeave: () -
                         (listOf(local) + remotes.filter { it !== sharer }).forEach { TileView(it, m, Modifier.weight(1f).fillMaxHeight(), compact = true) }
                     }
                 }
-                remotes.isEmpty() -> TileView(local, m, Modifier.fillMaxSize())
+                remotes.isEmpty() -> Box(Modifier.fillMaxSize()) {
+                    TileView(local, m, Modifier.fillMaxSize())
+                    if (m.callStatus.value == "ringing") {
+                        if (m.callerIsMe) RingbackTone()
+                        Column(
+                            Modifier.align(Alignment.Center).clip(RoundedCornerShape(20.dp)).background(Color(0xAA000000)).padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Avatar(title, 72)
+                            Spacer(Modifier.height(10.dp))
+                            Text(title, color = Ivory, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                            Text(L.t("ringing"), color = GoldLight, fontSize = 14.sp)
+                        }
+                    }
+                }
                 remotes.size == 1 -> Box(Modifier.fillMaxSize()) {
                     // one-to-one: other person full screen, yourself in a floating window
                     TileView(remotes[0], m, Modifier.fillMaxSize())
@@ -373,7 +397,7 @@ fun CallScreen(m: CallManager, title: String, onShare: () -> Unit, onLeave: () -
                     contentAlignment = Alignment.Center
                 ) { Icon(Icons.Filled.CallEnd, L.t("leave"), tint = Color.White) }
                 Spacer(Modifier.height(4.dp))
-                Text(if (m.isTeacher) L.t("endClass") else L.t("leave"), color = Color(0xCCFFFFFF), fontSize = 10.sp, maxLines = 1)
+                Text(if (m.canEndAll) L.t("endClass") else L.t("leave"), color = Color(0xCCFFFFFF), fontSize = 10.sp, maxLines = 1)
             }
         }
     }
@@ -398,16 +422,16 @@ fun CallScreen(m: CallManager, title: String, onShare: () -> Unit, onLeave: () -
     if (confirmEnd) {
         AlertDialog(
             onDismissRequest = { confirmEnd = false },
-            title = { Text(if (m.isTeacher) L.t("endClass") else L.t("leave")) },
-            text = { if (m.isTeacher) Text(L.t("endForAll")) },
+            title = { Text(if (m.canEndAll) L.t("endClass") else L.t("leave")) },
+            text = { if (m.canEndAll) Text(L.t("endForAll")) },
             confirmButton = {
-                TextButton(onClick = { confirmEnd = false; if (m.isTeacher) m.endForAll() else onLeave() }) {
-                    Text(if (m.isTeacher) L.t("endClass") else L.t("leave"), color = LiveRed)
+                TextButton(onClick = { confirmEnd = false; if (m.canEndAll) m.endForAll() else onLeave() }) {
+                    Text(if (m.canEndAll) L.t("endClass") else L.t("leave"), color = LiveRed)
                 }
             },
             dismissButton = {
                 Row {
-                    if (m.isTeacher) TextButton(onClick = { confirmEnd = false; onLeave() }) { Text(L.t("leave")) }
+                    if (m.canEndAll) TextButton(onClick = { confirmEnd = false; onLeave() }) { Text(L.t("leave")) }
                     TextButton(onClick = { confirmEnd = false }) { Text(L.t("no")) }
                 }
             }
@@ -449,5 +473,20 @@ fun CtrlButton(icon: ImageVector, label: String, active: Boolean, highlight: Boo
         }
         Spacer(Modifier.height(4.dp))
         Text(label, color = Color(0xCCFFFFFF), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+
+/** Plays the "ringing" tone for the caller while waiting for an answer. */
+@Composable
+fun RingbackTone() {
+    DisposableEffect(Unit) {
+        val tg = try { android.media.ToneGenerator(android.media.AudioManager.STREAM_VOICE_CALL, 70) } catch (_: Exception) { null }
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val r = object : Runnable {
+            override fun run() { try { tg?.startTone(android.media.ToneGenerator.TONE_SUP_RINGTONE, 1500) } catch (_: Exception) {}; handler.postDelayed(this, 4000) }
+        }
+        handler.post(r)
+        onDispose { handler.removeCallbacks(r); try { tg?.release() } catch (_: Exception) {} }
     }
 }

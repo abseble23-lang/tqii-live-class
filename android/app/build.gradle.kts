@@ -42,7 +42,25 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
+
+    flavorDimensions += "role"
+    productFlavors {
+        create("live") {
+            dimension = "role"
+            applicationId = "com.tqii.liveclass"
+            buildConfigField("boolean", "IS_ADMIN", "false")
+            buildConfigField("String", "APK_NAME", "\"TQII-Live-Class.apk\"")
+            resValue("string", "app_name", "TQII Live Class")
+        }
+        create("admin") {
+            dimension = "role"
+            applicationId = "com.tqii.liveclass.admin"
+            buildConfigField("boolean", "IS_ADMIN", "true")
+            buildConfigField("String", "APK_NAME", "\"TQII-Admin.apk\"")
+            resValue("string", "app_name", "TQII Admin")
+        }
+    }
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
 }
 

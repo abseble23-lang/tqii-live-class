@@ -21,7 +21,7 @@ import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 
-data class Profile(val id: String, val username: String, val fullName: String, val role: String, val active: Boolean)
+data class Profile(val id: String, val username: String, val fullName: String, val role: String, val active: Boolean, val phone: String? = null)
 data class ClassItem(
     val id: String, val title: String, val subject: String?, val teacherId: String?,
     val scheduledAt: Long, val durationMin: Int, val status: String
@@ -129,7 +129,8 @@ object Api {
 
     // ---------- data ----------
     private fun parseProfile(o: JSONObject) = Profile(
-        o.getString("id"), o.optString("username"), o.optString("full_name"), o.optString("role"), o.optBoolean("active", true)
+        o.getString("id"), o.optString("username"), o.optString("full_name"), o.optString("role"), o.optBoolean("active", true),
+        o.optString("phone").takeIf { it.isNotBlank() && it != "null" }
     )
 
     suspend fun loadMe(): Profile? {
@@ -139,7 +140,7 @@ object Api {
     }
 
     suspend fun profiles(): Map<String, Profile> {
-        val arr = JSONArray(rest("GET", "profiles?select=id,username,full_name,role,active"))
+        val arr = JSONArray(rest("GET", "profiles?select=id,username,full_name,role,active,phone&order=created_at.desc"))
         return (0 until arr.length()).map { parseProfile(arr.getJSONObject(it)) }.associateBy { it.id }
     }
 
@@ -184,6 +185,42 @@ object Api {
     }
 
     /** STUN + TURN servers from the "ice-servers" edge function (falls back to STUN only). */
+    // ---------- admin ----------
+    /** Calls the admin-users edge function. Throws ApiException with the server error code as message. */
+    suspend fun adminUsers(body: JSONObject): JSONObject {
+        token()
+        return try {
+            JSONObject(raw("POST", "${Config.SUPABASE_URL}/functions/v1/admin-users", body.toString(), true))
+        } catch (e: ApiException) {
+            val code = try { JSONObject(e.message ?: "").optString("error") } catch (_: Exception) { "" }
+            throw ApiException(e.code, code.ifBlank { e.message ?: "error" })
+        }
+    }
+
+    suspend fun createClass(row: JSONObject): String {
+        val arr = JSONArray(rest("POST", "classes?select=id", row.toString(), "return=representation"))
+        return arr.getJSONObject(0).getString("id")
+    }
+
+    suspend fun updateClass(id: String, row: JSONObject) { rest("PATCH", "classes?id=eq.$id", row.toString()) }
+
+    suspend fun deleteClass(id: String) { rest("DELETE", "classes?id=eq.$id") }
+
+    suspend fun setRoster(classId: String, studentIds: List<String>) {
+        rest("DELETE", "class_students?class_id=eq.$classId")
+        if (studentIds.isNotEmpty()) {
+            val arr = JSONArray()
+            studentIds.forEach { arr.put(JSONObject().put("class_id", classId).put("student_id", it)) }
+            rest("POST", "class_students", arr.toString(), "return=minimal")
+        }
+    }
+
+    fun isoOf(ms: Long): String {
+        val f = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+        f.timeZone = TimeZone.getTimeZone("UTC")
+        return f.format(Date(ms))
+    }
+
     suspend fun insertLogs(json: String) {
         rest("POST", "call_logs", json, "return=minimal")
     }

@@ -103,7 +103,7 @@ class CallActivity : ComponentActivity() {
                         }
                     },
                     onLeave = { leave() }
-                ) else Box(Modifier.fillMaxSize().background(Color(0xFF101614)))
+                ) else Box(Modifier.fillMaxSize().background(Night))
             }
         }
     }
@@ -168,14 +168,14 @@ data class Tile(
 
 @Composable
 fun Avatar(name: String, size: Int) {
-    Box(Modifier.size(size.dp).clip(CircleShape).background(Brand), contentAlignment = Alignment.Center) {
-        Text(name.trim().take(1).uppercase(), color = Color.White, fontSize = (size * 0.42f).sp, fontWeight = FontWeight.Bold)
+    Box(Modifier.size(size.dp).clip(CircleShape).background(GoldGradient), contentAlignment = Alignment.Center) {
+        Text(name.trim().take(1).uppercase(), color = Night, fontSize = (size * 0.42f).sp, fontWeight = FontWeight.Bold)
     }
 }
 
 @Composable
 fun TileView(t: Tile, m: CallManager, modifier: Modifier, overlay: Boolean = false, compact: Boolean = false) {
-    Box(modifier.clip(RoundedCornerShape(if (compact) 12.dp else 16.dp)).background(Color(0xFF1C2421))) {
+    Box(modifier.clip(RoundedCornerShape(if (compact) 12.dp else 16.dp)).background(Night2)) {
         val connected = t.local || t.conn == "connected"
         val showVideo = t.track != null && (t.camOn || t.sharing) && connected
         if (showVideo) {
@@ -190,7 +190,7 @@ fun TileView(t: Tile, m: CallManager, modifier: Modifier, overlay: Boolean = fal
                         Text(L.t("connFailed"), color = Color(0xFFFCA5A5), fontSize = 13.sp)
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(Modifier.size(14.dp), color = Color(0xFF7DD3C7), strokeWidth = 2.dp)
+                            CircularProgressIndicator(Modifier.size(14.dp), color = GoldLight, strokeWidth = 2.dp)
                             Spacer(Modifier.width(8.dp))
                             Text(L.t("connecting"), color = Color(0xCCFFFFFF), fontSize = 13.sp)
                         }
@@ -204,7 +204,7 @@ fun TileView(t: Tile, m: CallManager, modifier: Modifier, overlay: Boolean = fal
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (!t.micOn) { Icon(Icons.Filled.MicOff, null, tint = Color(0xFFFCA5A5), modifier = Modifier.size(13.dp)); Spacer(Modifier.width(3.dp)) }
-            if (t.teacher) { Icon(Icons.Filled.School, null, tint = Color(0xFF7DD3C7), modifier = Modifier.size(13.dp)); Spacer(Modifier.width(3.dp)) }
+            if (t.teacher) { Icon(Icons.Filled.School, null, tint = GoldLight, modifier = Modifier.size(13.dp)); Spacer(Modifier.width(3.dp)) }
             Text(if (t.local) L.t("you") else t.name, color = Color.White, fontSize = if (compact) 10.sp else 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
@@ -235,9 +235,9 @@ fun CallScreen(m: CallManager, title: String, onShare: () -> Unit, onLeave: () -
 
     if (m.ended.value) {
         LaunchedEffect(Unit) { delay(2500); onLeave() }
-        Box(Modifier.fillMaxSize().background(Color(0xFF101614)), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxSize().background(Night), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Filled.CheckCircle, null, tint = Color(0xFF2DD4BF), modifier = Modifier.size(56.dp))
+                Icon(Icons.Filled.CheckCircle, null, tint = GoldLight, modifier = Modifier.size(56.dp))
                 Spacer(Modifier.height(12.dp))
                 Text(L.t("classEnded"), color = Color.White, fontSize = 20.sp)
             }
@@ -252,9 +252,11 @@ fun CallScreen(m: CallManager, title: String, onShare: () -> Unit, onLeave: () -
     val sharer = remotes.firstOrNull { it.sharing }
     val elapsed = ElapsedTimer()
 
-    Column(Modifier.fillMaxSize().background(Color(0xFF101614)).systemBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(Night).systemBarsPadding()) {
         // header
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Logo(40.dp)
+            Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -307,9 +309,9 @@ fun CallScreen(m: CallManager, title: String, onShare: () -> Unit, onLeave: () -
                         .background(Brand).padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Filled.ScreenShare, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Filled.ScreenShare, null, tint = Night, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text(L.t("sharingScreen"), color = Color.White, fontSize = 12.sp)
+                    Text(L.t("sharingScreen"), color = Night, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -318,7 +320,7 @@ fun CallScreen(m: CallManager, title: String, onShare: () -> Unit, onLeave: () -
         if (moreOpen) {
             Column(
                 Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp).clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFF1C2421)).padding(12.dp)
+                    .background(Night2).padding(12.dp)
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     PillAction(Icons.Filled.Cameraswitch, L.t("flip")) { m.flipCamera() }
@@ -334,8 +336,8 @@ fun CallScreen(m: CallManager, title: String, onShare: () -> Unit, onLeave: () -
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { m.setBackground(opt) }) {
                             Box(
                                 Modifier.size(68.dp, 50.dp).clip(RoundedCornerShape(10.dp))
-                                    .border(2.dp, if (sel) Color(0xFF2DD4BF) else Color(0x22FFFFFF), RoundedCornerShape(10.dp))
-                                    .background(Color(0xFF2A3431)),
+                                    .border(2.dp, if (sel) GoldLight else Color(0x22FFFFFF), RoundedCornerShape(10.dp))
+                                    .background(Night3),
                                 contentAlignment = Alignment.Center
                             ) {
                                 when (opt.resId) {
@@ -345,7 +347,7 @@ fun CallScreen(m: CallManager, title: String, onShare: () -> Unit, onLeave: () -
                                 }
                             }
                             Spacer(Modifier.height(3.dp))
-                            Text(L.t(opt.key), color = if (sel) Color(0xFF2DD4BF) else Color.White, fontSize = 11.sp)
+                            Text(L.t(opt.key), color = if (sel) GoldLight else Color.White, fontSize = 11.sp)
                         }
                     }
                 }
@@ -381,7 +383,7 @@ fun CallScreen(m: CallManager, title: String, onShare: () -> Unit, onLeave: () -
         Box(Modifier.fillMaxSize().background(Color(0x66000000)).clickable { chatOpen = false; m.chatOpen = false }) {
             Column(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(0.65f)
-                    .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)).background(Color(0xFF151C1A))
+                    .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)).background(Night2)
                     .clickable(enabled = false) {}.imePadding()
             ) {
                 Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -416,13 +418,13 @@ fun CallScreen(m: CallManager, title: String, onShare: () -> Unit, onLeave: () -
 @Composable
 fun PillAction(icon: ImageVector, label: String, on: Boolean = false, onClick: () -> Unit) {
     Row(
-        Modifier.clip(RoundedCornerShape(20.dp)).background(if (on) Brand else Color(0xFF2A3431)).clickable(onClick = onClick)
+        Modifier.clip(RoundedCornerShape(20.dp)).background(if (on) Brand else Night3).clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, null, tint = Color.White, modifier = Modifier.size(18.dp))
+        Icon(icon, null, tint = if (on) Night else Color.White, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(6.dp))
-        Text(label, color = Color.White, fontSize = 13.sp)
+        Text(label, color = if (on) Night else Color.White, fontSize = 13.sp)
     }
 }
 
@@ -432,11 +434,11 @@ fun CtrlButton(icon: ImageVector, label: String, active: Boolean, highlight: Boo
         Box {
             Box(
                 Modifier.size(48.dp).clip(CircleShape)
-                    .background(if (highlight) Brand else if (active) Color(0xFF2A3431) else Color(0xFFF1F5F4))
+                    .background(if (highlight) Brand else if (active) Night3 else Ivory)
                     .clickable(onClick = onClick),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(icon, label, tint = if (highlight || active) Color.White else Ink, modifier = Modifier.size(22.dp))
+                Icon(icon, label, tint = if (highlight) Night else if (active) Color.White else Ink, modifier = Modifier.size(22.dp))
             }
             if (badge > 0) {
                 Box(

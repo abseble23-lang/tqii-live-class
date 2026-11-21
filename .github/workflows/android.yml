@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Android APKs
 
 on:
   push:
@@ -24,7 +24,7 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
-      - name: Build release APK
+      - name: Build release APKs (Live + Admin)
         working-directory: android
         env:
           VERSION_CODE: ${{ github.run_number }}
@@ -32,21 +32,27 @@ jobs:
           KEYSTORE_PASSWORD: rEcKIMPorhT-521vQ9Pj9yZc
           KEY_ALIAS: tqii
           KEY_PASSWORD: rEcKIMPorhT-521vQ9Pj9yZc
-        run: gradle assembleRelease --stacktrace
+        run: gradle assembleLiveRelease assembleAdminRelease --stacktrace
 
-      - name: Rename APK
-        run: cp android/app/build/outputs/apk/release/app-release.apk TQII-Live-Class.apk
+      - name: Collect APKs
+        run: |
+          cp android/app/build/outputs/apk/live/release/app-live-release.apk TQII-Live-Class.apk
+          cp android/app/build/outputs/apk/admin/release/app-admin-release.apk TQII-Admin.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: TQII-Live-Class-apk
-          path: TQII-Live-Class.apk
+          name: TQII-apks
+          path: "*.apk"
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
-          name: TQII Live Class v1.0.${{ github.run_number }}
-          body: "Android APK — download TQII-Live-Class.apk and install on your phone."
-          files: TQII-Live-Class.apk
+          name: TQII v1.0.${{ github.run_number }}
+          body: |
+            TQII Live Class (teachers & students): TQII-Live-Class.apk
+            TQII Admin (administrators): TQII-Admin.apk
+          files: |
+            TQII-Live-Class.apk
+            TQII-Admin.apk
           make_latest: true

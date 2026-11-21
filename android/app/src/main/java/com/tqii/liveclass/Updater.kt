@@ -35,7 +35,7 @@ object Updater {
                 val assets = j.optJSONArray("assets") ?: return@withContext null
                 for (i in 0 until assets.length()) {
                     val a = assets.getJSONObject(i)
-                    if (a.optString("name").endsWith(".apk")) {
+                    if (a.optString("name") == BuildConfig.APK_NAME) {
                         return@withContext Update(code, j.optString("name", tag), a.getString("browser_download_url"), j.optString("body"))
                     }
                 }

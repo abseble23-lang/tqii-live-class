@@ -40,6 +40,6 @@ jobs:
         with:
           tag_name: qaida-v1.0.${{ github.run_number }}
           name: TQII Qaida v1.0.${{ github.run_number }}
-          body: "TQII কায়দা — বাংলা ও ইংরেজি কণ্ঠসহ। Download TQII-Qaida.apk"
+          body: "TQII কায়দা — অ্যাপের ভেতরেই বাংলা ও ইংরেজি AI কণ্ঠ (ইন্টারনেট বা ফোনের কণ্ঠ ছাড়াই চলে)। Download TQII-Qaida.apk"
           files: TQII-Qaida.apk
           make_latest: false

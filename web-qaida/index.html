@@ -275,13 +275,13 @@ const ICON='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 9v6h4l5 4V5
 const AR=/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDF9\uFDFB-\uFDFF\uFE70-\uFEFF\u200d]+/g;
 
 /* ---------- speech ---------- */
-const synth = window.speechSynthesis; let voices=[]; let cur=null;
+const synth = window.speechSynthesis; let voices=[]; let cur=null; let VO=null;
 function loadVoices(){
   if(!synth) return; voices = synth.getVoices();
   fill('#vbn', v=>/^bn/i.test(v.lang), 'bn'); fill('#ven', v=>/^en/i.test(v.lang), 'en');
   const hasBn = voices.some(v=>/^bn/i.test(v.lang));
   $('#vhint').textContent = hasBn ? '' : 'এই ডিভাইসে বাংলা কণ্ঠ পাওয়া যায়নি। Android: Settings → Text-to-speech → Google Speech Services → বাংলা ভয়েস ডাউনলোড করুন। কম্পিউটারে Chrome বা Edge ব্রাউজার ব্যবহার করুন; Windows Settings → Time & Language → Speech থেকে বাংলা কণ্ঠ যোগ করা যায়।';
-  const n=document.getElementById('vnote'); if(n) n.classList.toggle('on', voices.length>0 && !hasBn);
+  const n=document.getElementById('vnote'); if(n) n.classList.toggle('on', !VO && voices.length>0 && !hasBn); if(VO) $('#vhint').textContent='';
 }
 function fill(sel, test, k){
   const el=$(sel), list=voices.filter(test);
@@ -298,16 +298,27 @@ function clean(t, lang){
   return t.replace(/\s*([,;:·•—–])\s*(?=[,;:·•—–])/g,'').replace(/[·•]/g,', ').replace(/\s+/g,' ').trim();
 }
 function chunks(t){ return t.split(/(?<=[।.?!])\s+/).reduce((a,s)=>{ if(a.length && (a[a.length-1]+s).length<180) a[a.length-1]+=' '+s; else a.push(s); return a; },[]).filter(s=>s.replace(/[\s,.;:]/g,'').length); }
+/* embedded AI voice (pre-recorded clips) with device-voice fallback */
+if(window.fetch) fetch('audio/manifest.json').then(r=>r.ok?r.json():null).then(j=>{ VO=j; if(j) loadVoices(); }).catch(()=>{});
+const vkey=s=>s.replace(/^[\s,.;:।?!—–-]+|[\s,.;:।?!—–-]+$/g,'').replace(/\s+/g,' ');
+const player=new Audio(); player.preload='auto'; let qid=0;
 function speak(text, lang, el){
-  if(!synth){ toast('এই ব্রাউজারে কণ্ঠ সুবিধা নেই। Chrome বা Edge ব্যবহার করুন।'); return; }
-  stop(); const parts = chunks(clean(text, lang)); if(!parts.length){ toast(lang==='en'?'No English text here — try বাংলা.':'এখানে বাংলা লেখা নেই — English চাপুন।'); return; }
-  const vn = $(lang==='bn'?'#vbn':'#ven').value, voice = voices.find(v=>v.name===vn);
-  if(lang==='bn' && !voice){ $('#vnote')&&$('#vnote').classList.add('on'); }
-  cur = el||null; if(cur) cur.classList.add('speaking');
-  parts.forEach((p,i)=>{ const u=new SpeechSynthesisUtterance(p); u.lang = voice?voice.lang:(lang==='bn'?'bn-BD':'en-US'); if(voice) u.voice=voice; u.rate=S.rate;
-    if(i===parts.length-1) u.onend=u.onerror=()=>{ if(cur) cur.classList.remove('speaking'); cur=null; }; synth.speak(u); });
+  stop(); const parts = clean(text, lang).split(/(?<=[।.?!])\s+/).filter(s=>vkey(s).replace(/[\s,.;:]/g,'').length);
+  if(!parts.length){ toast(lang==='en'?'No English text here — try বাংলা.':'এখানে বাংলা লেখা নেই — English চাপুন।'); return; }
+  const map=(VO&&VO[lang])||{}, vn=synth&&$(lang==='bn'?'#vbn':'#ven').value, voice=voices.find(v=>v.name===vn);
+  const q=parts.map(p=>({f:map[vkey(p)],t:p})).filter(x=>x.f||synth);
+  if(!q.length){ toast('এই ডিভাইসে কণ্ঠ সুবিধা নেই।'); return; }
+  const id=++qid; cur=el||null; if(cur) cur.classList.add('speaking');
+  const done=()=>{ if(id!==qid) return; if(cur) cur.classList.remove('speaking'); cur=null; };
+  const tts=t=>{ const u=new SpeechSynthesisUtterance(t); u.lang = voice?voice.lang:(lang==='bn'?'bn-BD':'en-US'); if(voice) u.voice=voice; u.rate=S.rate; u.onend=u.onerror=next; synth.speak(u); };
+  const fail=it=>{ if(id!==qid||it.x) return; it.x=1; if(synth) tts(it.t); else next(); };
+  let i=0; const next=()=>{ if(id!==qid) return; if(i>=q.length) return done(); const it=q[i++];
+    if(it.f){ player.src='audio/'+it.f; player.playbackRate=Math.max(.5,Math.min(2,S.rate/0.9)); player.onended=next; player.onerror=()=>fail(it);
+      const pr=player.play(); if(pr&&pr.catch) pr.catch(()=>fail(it)); }
+    else tts(it.t); };
+  next();
 }
-function stop(){ if(synth) synth.cancel(); if(cur) cur.classList.remove('speaking'); cur=null; }
+function stop(){ qid++; try{ player.pause(); player.onended=player.onerror=null; }catch(e){} if(synth) synth.cancel(); if(cur) cur.classList.remove('speaking'); cur=null; }
 let tt; function toast(m){ let n=$('#toast'); if(!n){ n=document.createElement('div'); n.id='toast'; n.style.cssText='position:fixed;left:50%;bottom:86px;transform:translateX(-50%);background:#001E19;color:#fff;border:1px solid #D4AF37;border-radius:12px;padding:10px 16px;z-index:50;max-width:90vw;font-size:14px'; document.body.appendChild(n);} n.textContent=m; n.style.display='block'; clearTimeout(tt); tt=setTimeout(()=>n.style.display='none',2600); }
 
 /* text of an element in one language */

@@ -95,7 +95,7 @@ class MainActivity : Activity() {
     private fun mime(p: String) = when (p.substringAfterLast('.').lowercase()) {
         "css" -> "text/css"; "js" -> "text/javascript"; "png" -> "image/png"; "jpg", "jpeg" -> "image/jpeg"
         "svg" -> "image/svg+xml"; "woff2" -> "font/woff2"; "woff" -> "font/woff"; "json", "webmanifest" -> "application/json"
-        "mp3" -> "audio/mpeg"; else -> "application/octet-stream"
+        "mp3" -> "audio/mpeg"; "ogg", "opus" -> "audio/ogg"; else -> "application/octet-stream"
     }
 
     // ---------- text to speech ----------
@@ -111,7 +111,7 @@ class MainActivity : Activity() {
                     override fun onError(id: String, errorCode: Int) = js("window.__ttsEvent&&__ttsEvent('$id','error')")
                 })
                 pushVoices()
-                main.postDelayed({ pushVoices(); checkBangla() }, 1500)
+                main.postDelayed({ pushVoices() }, 1500)  // AI voice is built in, so no install prompt
             }
         }
         // prefer Google's engine (has Bangla); fall back to the phone's default engine

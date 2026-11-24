@@ -1,0 +1,45 @@
+name: Build Qaida APK
+
+on:
+  push:
+    branches: [main]
+    paths: ["qaida/**", "web-qaida/**", ".github/workflows/qaida.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+      - name: Build release APK
+        working-directory: qaida
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          KEYSTORE_FILE: ${{ github.workspace }}/android/keystore/tqii-release.jks
+          KEYSTORE_PASSWORD: rEcKIMPorhT-521vQ9Pj9yZc
+          KEY_ALIAS: tqii
+          KEY_PASSWORD: rEcKIMPorhT-521vQ9Pj9yZc
+        run: gradle assembleRelease --stacktrace
+      - run: cp qaida/app/build/outputs/apk/release/app-release.apk TQII-Qaida.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TQII-Qaida-apk
+          path: TQII-Qaida.apk
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: qaida-v1.0.${{ github.run_number }}
+          name: TQII Qaida v1.0.${{ github.run_number }}
+          body: "TQII কায়দা — বাংলা ও ইংরেজি কণ্ঠসহ। Download TQII-Qaida.apk"
+          files: TQII-Qaida.apk
+          make_latest: false

@@ -3,7 +3,7 @@ name: Deploy admin panel
 on:
   push:
     branches: [main]
-    paths: ["admin/**", ".github/workflows/admin-pages.yml"]
+    paths: ["admin/**", "web-qaida/**", ".github/workflows/admin-pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -24,8 +24,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      - name: Assemble site (admin panel + Qaida web app at /qaida/)
+        run: |
+          mkdir -p site
+          cp -r admin/. site/
+          mkdir -p site/qaida
+          cp -r web-qaida/. site/qaida/
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: admin
+          path: site
       - id: deployment
         uses: actions/deploy-pages@v4

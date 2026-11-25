@@ -9,10 +9,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          for m in EMTIAZZ/bangladeshi-bangla-tts-vits bangla-speech-processing/bangla_tts_male bangla-speech-processing/bangla_tts_female hexgrad/Kokoro-82M; do
-            echo "=== $m"; curl -s "https://huggingface.co/api/models/$m" | python3 -c "import json,sys;d=json.load(sys.stdin);print('license:',d.get('cardData',{}).get('license'),'| gated:',d.get('gated'));print([s['rfilename'] for s in d.get('siblings',[])][:40])"
-          done
-          echo "=== Banglabox org"; curl -s "https://huggingface.co/api/models?author=Banglabox" | python3 -c "import json,sys;[print(x['id']) for x in json.load(sys.stdin)]"
-          curl -s "https://huggingface.co/api/datasets?author=Banglabox" | python3 -c "import json,sys;[print('ds',x['id']) for x in json.load(sys.stdin)]"
-          for m in $(curl -s "https://huggingface.co/api/models?author=Banglabox" | python3 -c "import json,sys;[print(x['id']) for x in json.load(sys.stdin)]"); do echo "=== $m"; curl -s "https://huggingface.co/api/models/$m" | python3 -c "import json,sys;d=json.load(sys.stdin);print('license:',d.get('cardData',{}).get('license'),'| gated:',d.get('gated'));print([s['rfilename'] for s in d.get('siblings',[])][:60])"; curl -s "https://huggingface.co/$m/raw/main/README.md" | head -c 3000; echo; done
-          echo "=== EMTIAZZ readme"; curl -s https://huggingface.co/EMTIAZZ/bangladeshi-bangla-tts-vits/raw/main/README.md | head -c 2500
+          M=Banglabox/chatterbox-bangla-tts
+          curl -s "https://huggingface.co/api/models/$M" | python3 -c "import json,sys;d=json.load(sys.stdin);[print(s['rfilename']) for s in d['siblings'] if not s['rfilename'].startswith('inference/src') and not s['rfilename'].startswith('training/')]"
+          echo ===README; curl -sL https://huggingface.co/$M/raw/main/README.md | tail -c +2500 | head -c 5000
+          echo ===REQ; curl -sL https://huggingface.co/$M/raw/main/inference/requirements.txt
+          echo ===INFER; curl -sL https://huggingface.co/$M/raw/main/inference/infer.py | head -c 9000
+          echo ===NORM; curl -sL https://huggingface.co/$M/raw/main/inference/bn_norm.py | head -c 2500
+          nproc; free -g | head -2

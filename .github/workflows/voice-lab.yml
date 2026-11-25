@@ -18,7 +18,7 @@ jobs:
           mkdir kit && cp -r bb/inference/. kit/ && cp -r bb/pretrained_models bb/voices kit/ && cp -r bb/checkpoint/adapter kit/adapter
           [ -f kit/src/model.py ] || cp bb/training/src/model.py kit/src/model.py || true
           ls kit kit/src
-          pip install -q --extra-index-url https://download.pytorch.org/whl/cpu -r kit/requirements.txt
+          pip install -q --extra-index-url https://download.pytorch.org/whl/cpu -r kit/requirements.txt resemble-perth
       - run: python voicelab/bn_sample.py
       - uses: actions/upload-artifact@v4
         with: { name: bn, path: voicelab/out }

@@ -2,17 +2,45 @@ name: voice lab
 on:
   push:
     branches: [voice-lab]
-    paths: ["voicelab/**", ".github/workflows/voice-lab.yml"]
+    paths: ["voicelab/*.py", "voicelab/samples.json", ".github/workflows/voice-lab.yml"]
 permissions: { contents: write }
 jobs:
-  probe:
+  bn:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Get BanglaBox
+        run: |
+          pip install -q huggingface_hub
+          python -c "from huggingface_hub import snapshot_download as s; s('Banglabox/chatterbox-bangla-tts', local_dir='bb')"
+          mkdir kit && cp -r bb/inference/. kit/ && cp -r bb/pretrained_models bb/voices kit/ && cp -r bb/checkpoint/adapter kit/adapter
+          [ -f kit/src/model.py ] || cp bb/training/src/model.py kit/src/model.py || true
+          ls kit kit/src
+          pip install -q --extra-index-url https://download.pytorch.org/whl/cpu -r kit/requirements.txt
+      - run: python voicelab/bn_sample.py
+      - uses: actions/upload-artifact@v4
+        with: { name: bn, path: voicelab/out }
+  en:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: sudo apt-get install -y -qq espeak-ng && pip install -q --extra-index-url https://download.pytorch.org/whl/cpu torch "kokoro>=0.9.4" soundfile
+      - run: python voicelab/en_sample.py
+      - uses: actions/upload-artifact@v4
+        with: { name: en, path: voicelab/out }
+  publish:
+    needs: [bn, en]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: dl }
       - run: |
-          M=Banglabox/chatterbox-bangla-tts
-          curl -s "https://huggingface.co/api/models/$M" | python3 -c "import json,sys;d=json.load(sys.stdin);[print(s['rfilename']) for s in d['siblings'] if not s['rfilename'].startswith('inference/src') and not s['rfilename'].startswith('training/')]"
-          echo ===README; curl -sL https://huggingface.co/$M/raw/main/README.md | tail -c +2500 | head -c 5000
-          echo ===REQ; curl -sL https://huggingface.co/$M/raw/main/inference/requirements.txt
-          echo ===INFER; curl -sL https://huggingface.co/$M/raw/main/inference/infer.py | head -c 9000
-          echo ===NORM; curl -sL https://huggingface.co/$M/raw/main/inference/bn_norm.py | head -c 2500
-          nproc; free -g | head -2
+          mkdir -p voicelab/out && cp dl/*/*.wav voicelab/out/ 2>/dev/null || true
+          git config user.name tqii-bot; git config user.email bot@users.noreply.github.com
+          git add voicelab/out && git commit -m "voice lab samples" && git push || true

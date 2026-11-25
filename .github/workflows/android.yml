@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
     paths: ["android/**", ".github/workflows/android.yml"]
+  pull_request:
+    paths: ["android/**", ".github/workflows/android.yml"]
   workflow_dispatch:
 
 permissions:
@@ -24,14 +26,27 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
+      - name: Signing key
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          # The key file in the repo is encrypted; its password lives only in the KEYSTORE_PASSWORD secret.
+          if [ -n "$KEYSTORE_PASSWORD" ]; then
+            echo "KEYSTORE_FILE=$GITHUB_WORKSPACE/android/keystore/tqii-release-2026.p12" >> "$GITHUB_ENV"
+          elif [ "$GITHUB_REF" = "refs/heads/main" ] && [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            echo "::error::Add the KEYSTORE_PASSWORD secret (Settings > Secrets and variables > Actions) before releasing."
+            exit 1
+          else
+            echo "No KEYSTORE_PASSWORD secret: test build only (debug-signed, not released)."
+          fi
+
       - name: Build release APKs (Live + Admin)
         working-directory: android
         env:
           VERSION_CODE: ${{ github.run_number }}
-          KEYSTORE_FILE: ${{ github.workspace }}/android/keystore/tqii-release.jks
-          KEYSTORE_PASSWORD: rEcKIMPorhT-521vQ9Pj9yZc
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: tqii
-          KEY_PASSWORD: rEcKIMPorhT-521vQ9Pj9yZc
+          KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: gradle assembleLiveRelease assembleAdminRelease --stacktrace
 
       - name: Collect APKs
@@ -45,6 +60,7 @@ jobs:
           path: "*.apk"
 
       - name: Publish release
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}

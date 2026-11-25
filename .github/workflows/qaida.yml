@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
     paths: ["qaida/**", "web-qaida/**", ".github/workflows/qaida.yml"]
+  pull_request:
+    paths: ["qaida/**", ".github/workflows/qaida.yml"]
   workflow_dispatch:
 
 permissions:
@@ -21,14 +23,27 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.11.1"
+      - name: Signing key
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          # The key file in the repo is encrypted; its password lives only in the KEYSTORE_PASSWORD secret.
+          if [ -n "$KEYSTORE_PASSWORD" ]; then
+            echo "KEYSTORE_FILE=$GITHUB_WORKSPACE/android/keystore/tqii-release-2026.p12" >> "$GITHUB_ENV"
+          elif [ "$GITHUB_REF" = "refs/heads/main" ] && [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            echo "::error::Add the KEYSTORE_PASSWORD secret (Settings > Secrets and variables > Actions) before releasing."
+            exit 1
+          else
+            echo "No KEYSTORE_PASSWORD secret: test build only (debug-signed, not released)."
+          fi
+
       - name: Build release APK
         working-directory: qaida
         env:
           VERSION_CODE: ${{ github.run_number }}
-          KEYSTORE_FILE: ${{ github.workspace }}/android/keystore/tqii-release.jks
-          KEYSTORE_PASSWORD: rEcKIMPorhT-521vQ9Pj9yZc
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: tqii
-          KEY_PASSWORD: rEcKIMPorhT-521vQ9Pj9yZc
+          KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: gradle assembleRelease --stacktrace
       - run: cp qaida/app/build/outputs/apk/release/app-release.apk TQII-Qaida.apk
       - uses: actions/upload-artifact@v4
@@ -36,6 +51,7 @@ jobs:
           name: TQII-Qaida-apk
           path: TQII-Qaida.apk
       - name: Publish release
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: qaida-v1.0.${{ github.run_number }}

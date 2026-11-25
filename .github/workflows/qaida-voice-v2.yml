@@ -4,6 +4,8 @@ on:
     inputs:
       bn_ref: { description: "Bangla reference voice (ref_female.wav / ref_male.wav)", default: "ref_female.wav" }
       en_voice: { description: "Kokoro English voice", default: "af_heart" }
+      only: { description: "comma list of clips to redo (empty = all)", default: "" }
+      seed_offset: { description: "change to get a different take", default: "0" }
 permissions: { contents: write, actions: write }
 jobs:
   gen:
@@ -25,7 +27,7 @@ jobs:
           [ -f kit/src/model.py ] || cp bb/training/src/model.py kit/src/model.py
           pip install -q --extra-index-url https://download.pytorch.org/whl/cpu -r kit/requirements.txt resemble-perth "kokoro>=0.9.4"
       - name: Generate shard
-        env: { BN_REF: "${{ inputs.bn_ref }}", EN_VOICE: "${{ inputs.en_voice }}" }
+        env: { BN_REF: "${{ inputs.bn_ref }}", EN_VOICE: "${{ inputs.en_voice }}", ONLY: "${{ inputs.only }}", SEED_OFFSET: "${{ inputs.seed_offset }}" }
         run: python tools/qaida-voice/gen_v2.py tools/qaida-voice/sentences.json out ${{ matrix.shard }} 28
       - uses: actions/upload-artifact@v4
         with: { name: "shard-${{ matrix.shard }}", path: out, retention-days: 3 }
@@ -37,11 +39,12 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { path: shards }
       - run: python3 tools/qaida-voice/merge_v2.py shards
+        env: { PARTIAL: "${{ inputs.only }}" }
       - env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           git config user.name tqii-bot; git config user.email bot@users.noreply.github.com
           git add -A web-qaida/audio tools/qaida-voice/ai-audio
-          git commit -m "Qaida voice v2: BanglaBox Bangla + Kokoro English"
+          git commit -m "Qaida voice v2: BanglaBox Bangla + Kokoro English ${{ inputs.only && '(redo)' || '' }}"
           git push
           gh workflow run qaida.yml --ref main
           gh workflow run admin-pages.yml --ref main

@@ -50,7 +50,23 @@ def prep_bn(t):
 
 def ok_len(w, text):
     d = len(w) / SR; n = max(1, len(re.sub(r"\s", "", text)))
-    return 0.25 < d < 1.2 + n * 0.22
+    return max(0.25, n * 0.055 - 0.3) < d < 1.2 + n * 0.22
+
+def phrases(t, limit=70):
+    """BanglaBox loses words on long inputs: split at punctuation into short phrases."""
+    if len(t) <= limit: return [t]
+    parts, cur = [], ""
+    for p in re.split(r"(?<=[।?!;,:])\s+", t):
+        if cur and len(cur) + len(p) > limit: parts.append(cur); cur = p
+        else: cur = (cur + " " + p).strip()
+    if cur: parts.append(cur)
+    out = []
+    for p in parts:
+        while len(p) > limit * 1.4:
+            cut = p.rfind(" ", 0, limit); cut = cut if cut > 20 else limit
+            out.append(p[:cut]); p = p[cut:].strip()
+        out.append(p)
+    return out
 
 def say_bn(t, seed):
     best = None
@@ -71,10 +87,11 @@ def render(sentence, seed):
     for c, t in runs(sentence):
         t = prep_bn(t) if c == "B" else prep_en(t)
         if not re.search(r"\w", t): continue
-        w = say_bn(t, seed) if c == "B" else say_en(t)
-        if w is None or not len(w): continue
-        if pieces: pieces.append(np.zeros(int(SR * 0.15), np.float32))
-        pieces.append(w)
+        for ph in (phrases(t) if c == "B" else [t]):
+            w = say_bn(ph, seed + len(pieces)) if c == "B" else say_en(ph)
+            if w is None or not len(w): continue
+            if pieces: pieces.append(np.zeros(int(SR * 0.15), np.float32))
+            pieces.append(w)
     if not pieces: return None
     a = np.concatenate(pieces); a = a / (np.abs(a).max() or 1) * 0.9
     return np.concatenate([np.zeros(int(SR * 0.04), np.float32), a, np.zeros(int(SR * 0.25), np.float32)])
@@ -86,10 +103,13 @@ def encode(a, path):
 
 data = json.load(open(SRC, encoding="utf-8"))
 jobs = sorted([(len(s), l, i, k, s) for l in ("bn", "en") for i, (k, s) in enumerate(data[l])], reverse=True)
+ONLY = set(filter(None, os.environ.get("ONLY", "").split(",")))
+if ONLY: jobs = [j for j in jobs if f"{j[1]}{j[2]:04d}" in ONLY]
+SEED_OFF = int(os.environ.get("SEED_OFFSET", "0"))
 mine = [j for n, j in enumerate(jobs) if n % NS == SH]
 part = {"bn": {}, "en": {}}; t0 = time.time()
 for n, (_, l, i, k, s) in enumerate(mine):
-    try: a = render(s, i)
+    try: a = render(s, i + SEED_OFF)
     except Exception as e: print("FAIL", l, i, e, flush=True); continue
     if a is None: continue
     fn = f"{l}{i:04d}.ogg"; encode(a, os.path.join(OUT, fn)); part[l][k] = fn

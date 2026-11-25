@@ -68,15 +68,42 @@ def phrases(t, limit=70):
         out.append(p)
     return out
 
+BEST_OF = int(os.environ.get("BEST_OF", "1"))
+ASR = None
+if BEST_OF > 1:
+    from faster_whisper import WhisperModel
+    ASR = WhisperModel("large-v3-turbo", device="cpu", compute_type="int8")
+import difflib
+def _n(t):
+    t = t.translate(str.maketrans(BD, "0123456789"))
+    return re.sub(r"[^\u0980-\u09ff]", "", t)
+def heard(w, text):
+    import librosa
+    segs, _ = ASR.transcribe(librosa.resample(w, orig_sr=SR, target_sr=16000), language="bn", beam_size=3)
+    hyp = " ".join(x.text for x in segs)
+    return difflib.SequenceMatcher(None, _n(text), _n(hyp)).ratio()
+
+def take(t, seed):
+    torch.manual_seed(seed)
+    w, sr = BB.tts(t, BN_REF); w = np.asarray(w, np.float32)
+    if sr != SR:
+        import librosa; w = librosa.resample(w, orig_sr=sr, target_sr=SR)
+    return w
+
 def say_bn(t, seed):
-    best = None
-    for k in range(3):
-        torch.manual_seed(seed * 7 + k)
-        w, sr = BB.tts(t, BN_REF); w = np.asarray(w, np.float32)
-        if sr != SR:
-            import librosa; w = librosa.resample(w, orig_sr=sr, target_sr=SR)
-        if ok_len(w, t): return w
-        best = w if best is None or abs(len(w)) < abs(len(best)) else best
+    tries = max(BEST_OF, 3) + (3 if len(t) < 16 and BEST_OF > 1 else 0)
+    best, bs = None, -1
+    for k in range(tries):
+        w = take(t, seed * 7 + k)
+        good = ok_len(w, t)
+        if ASR is None:
+            if good: return w
+            if best is None: best = w
+            continue
+        sc = heard(w, t) + (0 if good else -0.3)
+        if sc > bs: best, bs = w, sc
+        if bs >= 0.88 or (k + 1 >= BEST_OF and bs >= 0.7): break
+    if ASR is not None: print(f"   bn take score {bs:.2f} :: {t[:40]}", flush=True)
     return best
 
 def say_en(t):

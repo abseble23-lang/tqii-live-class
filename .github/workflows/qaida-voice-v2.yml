@@ -5,6 +5,7 @@ on:
       bn_ref: { description: "Bangla reference voice (ref_female.wav / ref_male.wav)", default: "ref_female.wav" }
       en_voice: { description: "Kokoro English voice", default: "af_heart" }
       only: { description: "comma list of clips to redo (empty = all)", default: "" }
+      best_of: { description: "Bangla takes per phrase, chosen by speech recognition", default: "3" }
       seed_offset: { description: "change to get a different take", default: "0" }
 permissions: { contents: write, actions: write }
 jobs:
@@ -25,9 +26,9 @@ jobs:
           python -c "from huggingface_hub import snapshot_download as s; s('Banglabox/chatterbox-bangla-tts', local_dir='bb', allow_patterns=['inference/*','inference/**','pretrained_models/*','voices/*','checkpoint/**','training/src/model.py'])"
           mkdir kit && cp -r bb/inference/. kit/ && cp -r bb/pretrained_models bb/voices kit/ && cp -r bb/checkpoint/adapter kit/adapter
           [ -f kit/src/model.py ] || cp bb/training/src/model.py kit/src/model.py
-          pip install -q --extra-index-url https://download.pytorch.org/whl/cpu -r kit/requirements.txt resemble-perth "kokoro>=0.9.4"
+          pip install -q --extra-index-url https://download.pytorch.org/whl/cpu -r kit/requirements.txt resemble-perth "kokoro>=0.9.4" faster-whisper
       - name: Generate shard
-        env: { BN_REF: "${{ inputs.bn_ref }}", EN_VOICE: "${{ inputs.en_voice }}", ONLY: "${{ inputs.only }}", SEED_OFFSET: "${{ inputs.seed_offset }}" }
+        env: { BN_REF: "${{ inputs.bn_ref }}", EN_VOICE: "${{ inputs.en_voice }}", ONLY: "${{ inputs.only }}", SEED_OFFSET: "${{ inputs.seed_offset }}", BEST_OF: "${{ inputs.best_of }}" }
         run: python tools/qaida-voice/gen_v2.py tools/qaida-voice/sentences.json out ${{ matrix.shard }} 28
       - uses: actions/upload-artifact@v4
         with: { name: "shard-${{ matrix.shard }}", path: out, retention-days: 3 }

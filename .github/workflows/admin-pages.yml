@@ -3,7 +3,7 @@ name: Deploy admin panel
 on:
   push:
     branches: [main]
-    paths: ["admin/**", "web-qaida/**", ".github/workflows/admin-pages.yml"]
+    paths: ["admin/**", "web-qaida/**", "tools/qaida-voice/sentences.json", ".github/workflows/admin-pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -30,6 +30,7 @@ jobs:
           cp -r admin/. site/
           mkdir -p site/qaida
           cp -r web-qaida/. site/qaida/
+          cp tools/qaida-voice/sentences.json site/qaida-record/sentences.json
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

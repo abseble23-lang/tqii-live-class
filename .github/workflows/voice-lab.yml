@@ -2,45 +2,13 @@ name: voice lab
 on:
   push:
     branches: [voice-lab]
-    paths: ["voicelab/*.py", "voicelab/samples.json", ".github/workflows/voice-lab.yml"]
+    paths: ["voicelab/asr.py", "voicelab/samples.json", ".github/workflows/voice-lab.yml"]
 permissions: { contents: write }
 jobs:
-  bn:
+  asr:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
-      - name: Get BanglaBox
-        run: |
-          pip install -q huggingface_hub
-          python -c "from huggingface_hub import snapshot_download as s; s('Banglabox/chatterbox-bangla-tts', local_dir='bb')"
-          mkdir kit && cp -r bb/inference/. kit/ && cp -r bb/pretrained_models bb/voices kit/ && cp -r bb/checkpoint/adapter kit/adapter
-          [ -f kit/src/model.py ] || cp bb/training/src/model.py kit/src/model.py || true
-          ls kit kit/src
-          pip install -q --extra-index-url https://download.pytorch.org/whl/cpu -r kit/requirements.txt resemble-perth
-      - run: python voicelab/bn_sample.py
-      - uses: actions/upload-artifact@v4
-        with: { name: bn, path: voicelab/out }
-  en:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
-      - run: sudo apt-get install -y -qq espeak-ng && pip install -q --extra-index-url https://download.pytorch.org/whl/cpu torch "kokoro>=0.9.4" soundfile
-      - run: python voicelab/en_sample.py
-      - uses: actions/upload-artifact@v4
-        with: { name: en, path: voicelab/out }
-  publish:
-    needs: [bn, en]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with: { path: dl }
-      - run: |
-          mkdir -p voicelab/out && cp dl/*/*.wav voicelab/out/ 2>/dev/null || true
-          git config user.name tqii-bot; git config user.email bot@users.noreply.github.com
-          git add voicelab/out && git commit -m "voice lab samples" && git push || true
+      - run: pip install -q faster-whisper && python voicelab/asr.py

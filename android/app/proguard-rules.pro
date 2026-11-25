@@ -7,3 +7,7 @@
 -dontwarn org.conscrypt.**
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
+# WebView bridge for the admin panel tab (window.print)
+-keepclassmembers class com.tqii.liveclass.PrintBridge {
+    @android.webkit.JavascriptInterface <methods>;
+}

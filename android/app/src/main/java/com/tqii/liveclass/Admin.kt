@@ -67,6 +67,8 @@ fun AdminRoot(onLogout: () -> Unit) {
     var tab by remember { mutableIntStateOf(0) }
     var chatFor by remember { mutableStateOf<Contact?>(null) }
     var toast by remember { mutableStateOf("") }
+    val panel = remember { PanelState() }
+    val logout = { Panel.clearSession(); panel.web?.destroy(); panel.web = null; onLogout() }
 
     LaunchedEffect(Unit) { while (true) { data.load(); delay(10_000) } }
     LaunchedEffect(toast) { if (toast.isNotEmpty()) { delay(2200); toast = "" } }
@@ -88,8 +90,13 @@ fun AdminRoot(onLogout: () -> Unit) {
 
     Box(Modifier.fillMaxSize().background(Ivory)) {
         Column(Modifier.fillMaxSize()) {
-            BrandHeader("TQII Admin", Api.me?.name) {
-                IconButton(onClick = { reload() }) { Icon(Icons.Filled.Refresh, null, tint = Ivory) }
+            BrandHeader(if (tab == 5) L.t("adminTagline") else "TQII Admin", Api.me?.name) {
+                if (tab == 5) {
+                    IconButton(onClick = { panel.openOutside(act) }) { Icon(Icons.Filled.OpenInBrowser, L.t("openInBrowser"), tint = Ivory) }
+                    IconButton(onClick = { panel.reload() }) { Icon(Icons.Filled.Refresh, null, tint = Ivory) }
+                } else {
+                    IconButton(onClick = { reload() }) { Icon(Icons.Filled.Refresh, null, tint = Ivory) }
+                }
             }
             Box(Modifier.weight(1f)) {
                 when (tab) {
@@ -97,7 +104,8 @@ fun AdminRoot(onLogout: () -> Unit) {
                     1 -> AdminStudents(data, onChanged = { reload() }, onToast = { toast = it })
                     2 -> AdminCalls(data)
                     3 -> AdminAccess(data, onChanged = { reload() }, onToast = { toast = it })
-                    else -> AdminMore(onLogout, onToast = { toast = it })
+                    5 -> AdminPanelWeb(panel)
+                    else -> AdminMore(logout, onToast = { toast = it })
                 }
             }
             NavigationBar(containerColor = Color.White, tonalElevation = 0.dp, modifier = Modifier.border(1.dp, Line)) {
@@ -106,6 +114,7 @@ fun AdminRoot(onLogout: () -> Unit) {
                     Triple(Icons.Filled.Groups, "studentLogins", 1),
                     Triple(Icons.Filled.History, "calls", 2),
                     Triple(Icons.Filled.VerifiedUser, "access", 3),
+                    Triple(Icons.Filled.Dashboard, "manage", 5),
                     Triple(Icons.Filled.Settings, "settings", 4),
                 ).forEach { (icon, key, i) ->
                     NavigationBarItem(

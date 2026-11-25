@@ -1,0 +1,39 @@
+name: Qaida voice QA (speech recognition)
+on:
+  workflow_dispatch:
+    inputs:
+      old_ref: { description: "commit with the previous clips", default: "7c5d17700f4449ad4a220bec298a61f0c0c0ce98" }
+permissions: { contents: read }
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    strategy: { fail-fast: false, matrix: { shard: [0,1,2,3,4,5,6,7,8,9,10,11] } }
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: |
+          mkdir old && git archive ${{ inputs.old_ref }} web-qaida/audio | tar -x -C old --strip-components=2
+          pip install -q faster-whisper
+          python tools/qaida-voice/qa_asr.py tools/qaida-voice/sentences.json web-qaida/audio/manifest.json old ${{ matrix.shard }} 12 qa-${{ matrix.shard }}.json
+      - uses: actions/upload-artifact@v4
+        with: { name: "qa-${{ matrix.shard }}", path: "qa-*.json", retention-days: 5 }
+  report:
+    needs: qa
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: qa }
+      - run: |
+          python3 - <<'PY'
+          import json,glob
+          r=[x for f in glob.glob('qa/*/*.json') for x in json.load(open(f))]
+          for l in ('bn','en'):
+              a=[x for x in r if x['f'].startswith(l) and x['old'] is not None]
+              print(l,'clips',len(a),'mean new',round(sum(x['new'] for x in a)/len(a),3),'mean old',round(sum(x['old'] for x in a)/len(a),3),
+                    'new better',sum(x['new']>x['old']+0.05 for x in a),'old better',sum(x['old']>x['new']+0.05 for x in a))
+          bad=[x for x in r if x['new']<0.55 and (x['old'] is None or x['new']<x['old']-0.15)]
+          print('FLAGGED',len(bad)); print('REDO='+','.join(sorted(x['f'][:-4] for x in bad)))
+          for x in sorted(bad,key=lambda x:x['new'])[:60]: print(x['f'],x['new'],x['old'],'|',x['text'][:70],'=>',x['hyp'][:70])
+          PY

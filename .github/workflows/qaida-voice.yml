@@ -1,0 +1,30 @@
+name: Qaida voice (Azure)
+on:
+  workflow_dispatch:
+    inputs:
+      bn_voice: { description: "Bangla voice", default: "bn-BD-PradeepNeural" }
+      en_voice: { description: "English voice", default: "en-US-AndrewNeural" }
+permissions:
+  contents: write
+  actions: write
+jobs:
+  voice:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate clips
+        env:
+          AZURE_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
+          AZURE_SPEECH_REGION: ${{ secrets.AZURE_SPEECH_REGION }}
+          BN_VOICE: ${{ inputs.bn_voice }}
+          EN_VOICE: ${{ inputs.en_voice }}
+        run: python3 tools/qaida-voice/azure_synth.py tools/qaida-voice/sentences.json web-qaida/audio
+      - name: Commit and rebuild
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          git config user.name "tqii-bot"; git config user.email "bot@users.noreply.github.com"
+          git add -A web-qaida/audio
+          git commit -m "Qaida voice: Azure ${{ inputs.bn_voice }} + ${{ inputs.en_voice }}" || exit 0
+          git push
+          gh workflow run qaida.yml --ref main
+          gh workflow run admin-pages.yml --ref main
